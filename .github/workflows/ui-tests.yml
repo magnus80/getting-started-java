@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 30
     outputs:
       report-generated: ${{ steps.generate.outcome == 'success' }}
+      compile-outcome: ${{ steps.compile.outcome }}
+      tests-outcome: ${{ steps.tests.outcome }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -174,3 +176,44 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  notify-telegram:
+    needs: ui-tests
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download JUnit results
+        if: needs.ui-tests.outputs.compile-outcome == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: junit-and-gradle-report
+          merge-multiple: true
+          path: build
+
+      - name: Send Telegram notification
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          JOB_STATUS: ${{ needs.ui-tests.result }}
+          COMPILE_OUTCOME: ${{ needs.ui-tests.outputs.compile-outcome }}
+          TESTS_OUTCOME: ${{ needs.ui-tests.outputs.tests-outcome }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          python3 ci/telegram_notify.py
+          --results-dir build/test-results/test
+          --job-status "$JOB_STATUS"
+          --compile-outcome "$COMPILE_OUTCOME"
+          --tests-outcome "$TESTS_OUTCOME"
+          --project "$GITHUB_REPOSITORY"
+          --ci "GitHub Actions"
+          --branch "$BRANCH"
+          --commit "$COMMIT"
+          --run-url "$RUN_URL"

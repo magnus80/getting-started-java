@@ -30,8 +30,8 @@
 | 2 — Ещё два теста | реализована; есть нестабильность внешнего GitHub, см. ниже |
 | 3 — Page Object | реализована; нестабильность внешнего GitHub сохраняется, см. ниже |
 | 4 — Allure-отчёты | завершена, см. ниже |
-| 5 — GitHub Actions | завершена; временные ветки в форке ждут удаления |
-| 6 — Telegram | не начата |
+| 5 — GitHub Actions | завершена, см. ниже |
+| 6 — Telegram | реализована и проверена локально; CI и реальная отправка не проверены |
 | 7 — Jenkins | не начата |
 | 8 — Review | не начата |
 
@@ -260,7 +260,7 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
   - **39301635750** `ci-check/assertion-fail` (`QA.GURU-NO-SUCH-TEXT`): `Run UI tests` — failure; загружены `allure-results` (231 КБ против 4.4 КБ у зелёного прогона — вложения), `junit-and-gradle-report`, `allure-report`; Pages пропущен (не default branch). JUnit XML (скачан пользователем): `tests=3 failures=1`, причина — `Element should have text "QA.GURU-NO-SUCH-TEXT"`, остальные два теста passed; не HTTP 429.
   - **39301635898** `ci-check/compile-fail` (пропущена `;`): первая попытка — **cancelled** без jobs (см. ограничение concurrency); после Re-run (attempt 2) — `Compile tests` failure с аннотацией `SearchTests.java:28 ';' expected`; тесты, загрузки, генерация и Pages пропущены; артефактов нет.
   - **39301635107** `ci-check/no-results` (`--tests NoSuchTest`): `Run UI tests` — failure; `Upload Allure results` — warning «No files were found»; `Generate Allure report` — failure с `::error::No Allure test results`; отчёт и Pages пропущены; загружен только `junit-and-gradle-report`.
-- [ ] Временные ветки `ci-check/assertion-fail`, `ci-check/compile-fail`, `ci-check/no-results` удалить в форке (пользователь); локально удалены.
+- [x] Временные ветки `ci-check/assertion-fail`, `ci-check/compile-fail`, `ci-check/no-results` удалены в форке (пользователь; подтверждено `git ls-remote`: осталась только `hw1`) и локально.
 
 Ограничения:
 
@@ -269,6 +269,45 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 - `--no-sandbox` не используется; `sysctl` ослабляет ограничение AppArmor только на ephemeral runner.
 - Визуальная приёмка отчёта на Pages пользователем не зафиксирована (проверено: HTTP 200 и JSON).
 - Внешний github.com: нестабильность загрузки `/search` и HTTP 429 по-прежнему возможны; ретраев нет.
+
+## Фаза 6 — Telegram
+
+Статус: реализована и проверена локально 2026-10-19 (Windows 10, Python 3.13.13); реальный запуск в GitHub Actions и реальная отправка не выполнялись.
+
+### Согласовано
+
+- [x] Источник уведомлений — GitHub Actions; Jenkins (фаза 7) переиспользует тот же скрипт.
+- [x] Уведомлять обо всех исходах (success, failure тестов, ошибка сборки/шага до тестов, отмена) для всех веток и ручных запусков.
+- [x] Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (те же имена — для Jenkins Credentials). Значения в чат не передаются; пользователь заводит их в Settings → Secrets.
+- [x] Нет secrets → `::warning::`, отправка пропускается, exit 0. Ошибка Telegram API (HTTP ≠ 200, `ok != true`, timeout) → `::error::`, exit 1.
+- [x] Язык — Python 3, только stdlib (новый язык в проекте согласован пользователем); runner ubuntu-24.04 — Python 3.12.3, локально — 3.13.13.
+- [x] Отдельный job `notify-telegram` (`needs: ui-tests`, `if: always()`): ошибка уведомления не меняет статус `ui-tests`, без `continue-on-error`; токен доступен только этому job.
+- [x] Статистика — по `<testcase>` всех JUnit XML (`failure` → failed, `error` → broken, `skipped` → skipped), без атрибутов-счётчиков suite и без дублирования вложенных `testsuite`; не из файлов Allure-отчёта. Статусы различают: PASSED, FAILED, BUILD ERROR (тесты не запускались), NO RESULTS (нет/битый XML), NO TESTS (0 testcase), CANCELLED.
+- [x] Сообщение — plain text: проект, CI, branch, commit, статус, passed/failed/broken/skipped/total, ссылка на запуск. HTTP: POST `sendMessage`, timeout 10 с; токен и chat ID не логируются, в текстах ошибок заменяются на `***`.
+- [x] Проверка без реальной отправки — fixtures + локальный mock HTTP; реальная отправка — только после отдельного разрешения пользователя.
+
+### Реализация
+
+Файлы: [ci/telegram_notify.py](../../ci/telegram_notify.py), [ci/test_telegram_notify.py](../../ci/test_telegram_notify.py), `.github/workflows/ui-tests.yml` (outputs `compile-outcome`/`tests-outcome` у `ui-tests`; job `notify-telegram`), `.gitignore` (`__pycache__/`), этот план.
+
+- Скрипт: аргументы `--results-dir`, `--job-status`, `--compile-outcome`, `--tests-outcome`, `--project`, `--ci`, `--branch`, `--commit`, `--run-url`, `--timeout` (10 с), `--dry-run`; secrets — из env `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`; `TELEGRAM_API_URL` переопределяет адрес API (для mock в тестах). Пустой outcome трактуется как `skipped`. Приоритет статусов: CANCELLED → BUILD ERROR (compile ≠ success, XML не читается — старые результаты не попадают в сообщение) → NO RESULTS → NO TESTS → FAILED → TEST STEP FAILED (Gradle упал при зелёном XML) → PASSED. Вывод в UTF-8 (`reconfigure`), чтобы консоль cp1251 на Windows-агенте не ломала печать.
+- `notify-telegram`: `needs: ui-tests`, `if: always()`, `timeout-minutes: 5`; checkout (`persist-credentials: false`); JUnit XML скачивается только при `compile-outcome == success` через `actions/download-artifact` v8.0.2 `9000827ccba6bdab643e8b6fd33ac0654aef8333` (2026-10-07) с `pattern` + `merge-multiple: true` в `build/`. По исходникам v8.0.2: `name` при отсутствии артефакта бросает `Artifact '…' not found`, `pattern` без совпадений — не ошибка; «нет результатов» разбирает скрипт. Все значения передаются через `env` и процитированные аргументы; токен доступен только этому job.
+
+### Проверено локально (2026-10-19)
+
+- [x] `python -m unittest test_telegram_notify` (из `ci/`, `PYTHONDONTWRITEBYTECODE=1`) — 30 тестов OK: подсчёт passed/failed/broken/skipped; несколько XML; вложенные `testsuite` без двойного счёта; атрибуты-счётчики suite игнорируются; 0 testcase; нет каталога; пустой каталог; битый XML; чужой root; PASSED с проверкой пути, `chat_id` и текста запроса; FAILED (уведомление при упавших тестах — exit 0); broken; BUILD ERROR при наличии старых XML; ошибка до compile; CANCELLED; NO RESULTS; NO TESTS; TEST STEP FAILED; нет обоих secrets / нет chat ID (warning, запросов нет); HTTP 401, HTTP 502, HTTP 200 + `ok=false`, не-JSON, JSON-массив; timeout (0.5 с, завершение < 1.9 с); connection refused; редактирование токена и chat ID в описании ошибки; `--dry-run` без запроса. В каждом сценарии проверено отсутствие токена и chat ID в stdout/stderr.
+- [x] Мутации (на копии во временном каталоге): без `redact` падает тест редактирования; без учёта `broken` в FAILED падает тест broken.
+- [x] Найден и исправлен шум тестов: на Windows mock-сервер получал `ConnectionAbortedError` после таймаута клиента — перехват расширен до `ConnectionError`.
+- [x] Реальный JUnit XML: `./gradlew test --rerun-tasks -Dheadless=true` — 3/3; `--dry-run` на `build/test-results/test` → `UI tests: PASSED`, `passed 3, failed 0, broken 0, skipped 0, total 3`.
+- [x] Команда шага `Send Telegram notification` выполнена локально в bash с теми же env без secrets → warning, exit 0; отмена с пустыми outcome → `CANCELLED`.
+- [x] Структура артефакта `junit-and-gradle-report` (по фактически скачанному zip из CI): `test-results/test/TEST-*.xml` → после скачивания в `build/` путь `build/test-results/test` совпадает с `--results-dir`.
+- [x] `actionlint` 1.7.12 — 0 ошибок; ShellCheck локально отсутствует.
+
+### Не проверено
+
+- [ ] Реальный run в GitHub Actions: регистрация `notify-telegram`, скачивание артефакта, `python3` на runner, поведение без secrets (ожидается warning).
+- [ ] Реальная отправка и сверка фактического сообщения — после добавления secrets пользователем и разрешения.
+- [ ] Уведомления при контролируемых падениях в CI и при неверном токене.
 
 ## Базовые команды проверки
 
