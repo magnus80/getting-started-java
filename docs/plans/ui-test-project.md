@@ -15,16 +15,18 @@
 - Selenide 7.18.2, JUnit Jupiter 6.1.3 (Selenium 4.49.0 транзитивно). Версии без согласования не менять.
 - Defaults: baseUrl=https://github.com, browser=chrome, browserSize=1920x1080, headless=false. Переопределение через `-DbaseUrl`, `-Dbrowser`, `-DbrowserSize`, `-Dheadless`; Gradle явно передаёт в JVM тестов только эти четыре свойства.
 - TestBase: настройка `Configuration` в `@BeforeEach`, `closeWebDriver()` в `@AfterEach` — отдельная сессия браузера на тест. Тесты открывают относительный `/search`.
+- Перед вводом запроса тест ждёт загрузки приложения поиска: `react-app[app-name='blackbird-search']` с классом `loaded` (решение фазы 2, вариант 1). Это ожидание предусловия, не ретрай.
+- Дополнительные сценарии фазы 2 (согласованы пользователем 2026-10-19): переход из выдачи `selenide` в репозиторий `selenide/selenide`; empty state для `stars:<0`.
 
 ## Текущее состояние
 
-Последняя сверка файлов и git: 2026-10-19 (фаза 1).
+Последняя сверка файлов и git: 2026-10-19 (фаза 2).
 
 | Фаза | Статус |
 |---|---|
 | 0 — Baseline | завершена, см. ниже |
 | 1 — TestBase и воспроизводимость | завершена, см. ниже |
-| 2 — Ещё два теста | не начата |
+| 2 — Ещё два теста | реализована; есть нестабильность внешнего GitHub, см. ниже |
 | 3 — Page Object | не начата |
 | 4 — Allure-отчёты | не начата |
 | 5 — GitHub Actions | не начата |
@@ -102,6 +104,32 @@
 - Выборка процессов дискретная: процесс, живший меньше интервала опроса (~0.3–1 с), мог быть не замечен.
 - Предупреждение CDP 155 vs 153 сохраняется. Проверено только на Windows 10 и Chrome; другие браузеры не проверялись.
 - `-Dbrowser` передаётся, но фактически проверено только значение `chrome`.
+
+## Фаза 2 — Ещё два теста
+
+Статус: реализована 2026-10-19; финальные прогоны набора зелёные, но наблюдается внешняя нестабильность загрузки страницы поиска (причина не установлена).
+
+Изменённые файлы: `src/test/java/SearchTests.java`, этот план. Модификатор `public` у класса `SearchTests` убран вне агента (пользователь/IDE) во время фазы — оставлен как есть, JUnit Jupiter допускает package-private.
+
+### Этап A — исследование в реальном UI (Playwright, Chrome), до кода
+
+- [x] `selenide`: в `[data-testid='results-list']` ровно одна ссылка `a[href='/selenide/selenide']` — поиск по href, не по позиции; клик ведёт на `https://github.com/selenide/selenide`; `[data-testid='repo-name-wrapper']` = `selenide`.
+- [x] `stars:<0`: «0 results», `h3` «Your search did not match any repositories», `results-list` отсутствует. Семантика: `stars:<1` → 73.2M репозиториев, у первых в выдаче 0 stars — квалификатор числовой, `stars:<0` логически невозможен. Счётчик `resolved-count-label` показывает «...» — не используется; классы заголовка хешированные — поиск по тексту.
+- [x] Сценарии согласованы пользователем.
+
+### Этап B — реализация и проверка
+
+- [x] `openRepositoryFromSearchResultsTest`: URL содержит `/selenide/selenide`, имя репозитория — `exactText("selenide")`. Отличие от согласованного эскиза: `text` → `exactText` — мутацией показано, что `text("selenide")` + `urlContaining` пропускали переход в `selenide/selenide-appium`. Точный `url(...)` не используется: ломал бы переопределение `baseUrl=https://www.github.com` (редирект).
+- [x] `noResultsForImpossibleStarsRangeTest`: заголовок empty state видим, `results-list` не существует.
+- [x] Мутации (временные, откачены): чужой репозиторий → `exactText` падает (`Actual value: text="selenide-appium"`); `stars:<1` → заголовок empty state не найден; `cssClass("loaded-nope")` → ожидание загрузки падает.
+- [x] Финальные прогоны после добавления ожидания загрузки: `openRepositoryFromSearchResultsTest` и `noResultsForImpossibleStarsRangeTest` отдельно — passed; весь набор с defaults (`./gradlew test --rerun-tasks --console=plain`) — 3/3; headless (`-Dheadless=true -DbrowserSize=1366x768`) — 3/3. `successfulSearchTest` отдельно — **failed** из-за незагрузившегося приложения поиска (см. ниже); повторно не перезапускался.
+
+### Нестабильность: приложение поиска иногда не загружается
+
+- Наблюдалось 3 раза за сессию: дважды до добавления ожидания (`openRepository…` отдельно и в headless-наборе) — Enter после ввода не запускал поиск, страница оставалась на `/search` с введённым текстом; один раз после — упало ожидание `cssClass("loaded")` на `successfulSearchTest`, до ввода текста.
+- Во всех случаях в page source у `<react-app app-name="blackbird-search">` нет `class="loaded"` и `data-catalyst` (на рабочих страницах есть); в одном случае не применились и стили. Не HTTP 429 (совпадения «429» в HTML — хеши/SVG), не ошибка локатора.
+- Временный замер (12 открытий `/search`, headed и headless; тест удалён): в норме приложение загружено уже к возврату `open()`, `loaded` через 40–100 мс — гонки ввода с гидрацией в норме нет.
+- Причина незагрузки (сеть, ресурсы `githubassets.com`, холодный старт браузера) **не установлена**. Ожидание не устраняет сбой, а делает падение диагностируемым («приложение не загрузилось» вместо «ссылка не найдена»). Ретраи не добавлялись.
 
 ## Базовые команды проверки
 
