@@ -32,8 +32,8 @@
 | 4 — Allure-отчёты | завершена, см. ниже |
 | 5 — GitHub Actions | завершена, см. ниже |
 | 6 — Telegram | завершена, см. ниже |
-| 7 — Jenkins | реализована и проверена на jenkins.qa.guru; отправка в Telegram из Jenkins не проверена |
-| 8 — Review | не начата |
+| 7 — Jenkins | завершена; отправка в Telegram из Jenkins не проверена (решение пользователя) |
+| 8 — Review | завершена, см. ниже |
 
 ## Фаза 0 — Baseline
 
@@ -376,10 +376,45 @@ Job `magnus80-ui-tests` создана пользователем (Pipeline scri
   - `ci-check/jenkins-compile` (`deecb52`, пропущена `;`): `SearchTests.java:28: error: ';' expected`; `Run UI tests` и `Generate Allure report` — `skipped due to earlier failure(s)`; в post — один `unstash` (только скрипт, JUnit XML не забирался); **`Finished: FAILURE`**.
   - `ci-check/jenkins-no-results` (`b2000c6`, `--tests NoSuchTest` в Jenkinsfile): `No tests found for given includes: [NoSuchTest]`; `Stashed 0 file(s)`; `junit` — `No test report files were found. Configuration error?`; генерация отчёта пропущена; **`Finished: FAILURE`**.
 - [x] Временные ветки `ci-check/jenkins-*` удалены локально.
-- [ ] Удалить в форке `ci-check/jenkins-*` и `ci-check/notify-*` (пользователь); вернуть Branch Specifier job на `*/hw1` (пользователь).
-- [ ] Отправка из Jenkins (зависит от решения по Credentials).
+- [x] Временные ветки `ci-check/jenkins-*` и `ci-check/notify-*` удалены в форке пользователем (подтверждено `git ls-remote`: только `hw1`). Возврат Branch Specifier job на `*/hw1` — по сообщению пользователя не подтверждён отдельно.
+- [x] Отправка из Jenkins — решение пользователя: оставить без Credentials (риск общих Credentials на shared Jenkins); уведомление пропускается с warning. Наличие `python3` на агенте `python` и реальная отправка из Jenkins не проверены.
 - [ ] Агент `python`: наличие `python3` — не проверено (скрипт уведомления не вызывался без Credentials).
 - [ ] Credentials: на общем Jenkins глобальные Credentials доступны всем, кто может настраивать job, — скоуп и риск согласовать с пользователем.
+
+## Фаза 8 — Mini-review
+
+Статус: завершена 2026-10-19. Код, workflow и Jenkinsfile при review не менялись.
+
+### Чек-лист задания
+
+- [x] **Чистый checkout проходит всю цепочку.** `git clone --branch hw1` форка (`5732ddd`) во временный каталог, изолированный `GRADLE_USER_HOME`: wrapper заново скачал Gradle 9.6.0 (с проверкой `distributionSha256Sum`); `testClasses` — BUILD SUCCESSFUL; `test -Dheadless=true` — `tests=3 failures=0 errors=0 skipped=0`; 3 `*-result.json`; `allure generate` → `passed=3, total=3`; `python -m unittest test_telegram_notify` — 30 OK; `git status` после прогона — 0 изменений (всё сгенерированное игнорируется). Временный каталог удалён.
+- [x] **Секретов и generated artifacts в git нет.** HEAD — 20 tracked-файлов, только исходники, wrapper, конфигурация и документация; нет `build/`, `.gradle/`, `allure-*`, `node_modules`, `__pycache__`, `.idea`, `*.class`. Поиск по `git log --all -p` шаблонов Telegram-токена, GitHub PAT, AWS-ключей, Slack-токенов и приватных ключей — совпадений нет (кроме фиктивных значений в `ci/test_telegram_notify.py`: `123456:SECRET-TOKEN-VALUE`, `-1009876543210`). Наблюдение: `build/` и `.gradle/` есть в истории курса — добавлены `299eca9` и удалены `09be4d9` (= `qa-guru/getting-started-java` master, автор курса); ни один из 12 коммитов этой работы их не затрагивает; история не переписывалась (потребовался бы force-push, это история upstream).
+- [x] **Статусы CI корректны** при падении тестов, ошибке сборки, отсутствии результатов и ошибке уведомления — см. фазы 5–7 (сводка ниже).
+- [x] **Разделено: проверено локально / в реальном CI / не проверено** — ниже.
+
+### Проверено локально (Windows 10, Chrome 155, Java 21.0.7, Python 3.13.13)
+
+- Исходный тест (фаза 0); TestBase, передача `-D` в JVM тестов, закрытие браузера после успеха и падения (фаза 1); три теста отдельно и набором, headless (фазы 2–3); Page Object без изменения семантики (фаза 3); Allure: шаги `@Step`, вложения при падении, очистка results, отчёт в браузере (фаза 4); unit-тесты уведомления 30/30, мутации, dry-run на реальном XML (фаза 6); `actionlint`; валидатор Jenkinsfile на jenkins.qa.guru; чистый checkout (фаза 8).
+
+### Проверено в реальном CI
+
+- **GitHub Actions** (форк `magnus80/getting-started-java`): успех + Pages (`39301206218`, последний — `39316920374` на `5732ddd`: все три job success, Pages HTTP 200); падение assertion (`39301635750`), ошибка компиляции (`39301635898` attempt 2), нет результатов (`39301635107`); диагностика и исправление песочницы Chrome (`39300547939`); Telegram: без secrets — warning (`39303783004` #1), реальная отправка PASSED (#2), FAILED (`39306919324`), BUILD ERROR (`39306919806`), неверный токен — падает только `notify-telegram`, `ui-tests` сохраняет свой failure (`39310385637`).
+- **Jenkins** (https://jenkins.qa.guru/job/magnus80-ui-tests/): SUCCESS (#2), UNSTABLE при упавшем тесте, FAILURE при ошибке компиляции и при отсутствии результатов; уведомление без Credentials пропускается с warning, статус не меняет.
+
+### Не проверено
+
+- Отправка в Telegram из Jenkins и `python3` на агенте `python` (решение пользователя не заводить Credentials на общем Jenkins).
+- В CI: Telegram-исходы NO RESULTS / NO TESTS / CANCELLED / timeout (покрыты unit-тестами); сценарий «ошибка генерации отчёта при сохранённых results»; dispatch с невалидным `browserSize`.
+- Визуальная приёмка отчёта на Pages и Test Result в Jenkins пользователем не зафиксирована; номера Jenkins-сборок с падениями не зафиксированы.
+- Другие ОС/браузеры; GitHub Actions — только ubuntu-24.04; Jenkins — только агент `java-jdk21`.
+
+### Открытые риски
+
+- Внешний github.com: нестабильная загрузка `/search` (4 случая за сессию, причина не установлена), HTTP 429; ретраев нет.
+- Selenium 4.49.0 поддерживает CDP v151–153; локальный Chrome 155 — предупреждение CDP; в CI закреплён CfT 153.
+- `--no-sandbox` в Jenkins (root в контейнере агента) — принятый риск; GitHub Actions — `sysctl` userns на ephemeral runner, песочница включена.
+- Concurrency GitHub Actions: при почти одновременных push ожидающий запуск отменяется (наблюдалось).
+- Pages публичны, включая вложения упавших прогонов.
 
 ## Базовые команды проверки
 
