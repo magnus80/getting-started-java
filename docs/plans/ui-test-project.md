@@ -17,6 +17,7 @@
 - TestBase: настройка `Configuration` в `@BeforeEach`, `closeWebDriver()` в `@AfterEach` — отдельная сессия браузера на тест. Тесты открывают относительный `/search`.
 - Перед вводом запроса тест ждёт загрузки приложения поиска: `react-app[app-name='blackbird-search']` с классом `loaded` (решение фазы 2, вариант 1). Это ожидание предусловия, не ретрай.
 - Дополнительные сценарии фазы 2 (согласованы пользователем 2026-10-19): переход из выдачи `selenide` в репозиторий `selenide/selenide`; empty state для `stars:<0`.
+- Page Object (согласовано 2026-10-19): packages `tests` (SearchTests, TestBase) и `pages` (SearchPage, SearchResultsPage, RepositoryPage); fluent API; проверки только в `should…`-методах страниц; `private final SelenideElement`/`ElementsCollection`-поля; методы называются действиями пользователя; `SearchPage` — поле теста; ожидание загрузки приложения поиска — в `SearchPage.open()`. BasePage, фабрик и компонентов нет.
 
 ## Текущее состояние
 
@@ -27,7 +28,7 @@
 | 0 — Baseline | завершена, см. ниже |
 | 1 — TestBase и воспроизводимость | завершена, см. ниже |
 | 2 — Ещё два теста | реализована; есть нестабильность внешнего GitHub, см. ниже |
-| 3 — Page Object | не начата |
+| 3 — Page Object | реализована; нестабильность внешнего GitHub сохраняется, см. ниже |
 | 4 — Allure-отчёты | не начата |
 | 5 — GitHub Actions | не начата |
 | 6 — Telegram | не начата |
@@ -130,6 +131,21 @@
 - Во всех случаях в page source у `<react-app app-name="blackbird-search">` нет `class="loaded"` и `data-catalyst` (на рабочих страницах есть); в одном случае не применились и стили. Не HTTP 429 (совпадения «429» в HTML — хеши/SVG), не ошибка локатора.
 - Временный замер (12 открытий `/search`, headed и headless; тест удалён): в норме приложение загружено уже к возврату `open()`, `loaded` через 40–100 мс — гонки ввода с гидрацией в норме нет.
 - Причина незагрузки (сеть, ресурсы `githubassets.com`, холодный старт браузера) **не установлена**. Ожидание не устраняет сбой, а делает падение диагностируемым («приложение не загрузилось» вместо «ссылка не найдена»). Ретраи не добавлялись.
+
+## Фаза 3 — Page Object
+
+Статус: реализована 2026-10-19; семантика сохранена; один headless-прогон упал на навигации к `/search` (внешний фактор, см. ниже).
+
+Изменённые файлы: `src/test/java/tests/SearchTests.java`, `src/test/java/tests/TestBase.java` (перенос через `git mv`, добавлен только `package tests;`), `src/test/java/pages/SearchPage.java`, `SearchResultsPage.java`, `RepositoryPage.java` (новые), этот план.
+
+- [x] Стиль и структура согласованы до реализации (включая отдельный `RepositoryPage` и `SearchPage` полем теста).
+- [x] `SearchPage.open()` вызывает `Selenide.open("/search")` явно: метод экземпляра `open()` перекрывает статически импортированный `open(String)`.
+- [x] Сравнение с `eae129f`: локаторы, тестовые данные, assertions и их порядок те же; вычисляемые из параметров значения дают прежние строки (`/selenide/selenide`, `exactText("selenide")`). Отличие: ссылка на репозиторий ищется цепочкой `resultsList.$("a[href=…]")` вместо одного CSS-селектора — тот же поиск потомка.
+- [x] `./gradlew testClasses --rerun-tasks` — BUILD SUCCESSFUL.
+- [x] Каждый тест отдельно (`--tests "tests.SearchTests.<method>"`) — passed; весь набор с defaults — 3/3.
+- [ ] Весь набор headless (`-Dheadless=true -DbrowserSize=1366x768`) — **2/3**: `openRepositoryFromSearchResultsTest` упал через 31 с на `driver.get("https://github.com/search")` в `SearchPage.open()` — `TimeoutException: Timed out receiving message from renderer`. Скриншот не создан. До логики страниц выполнение не дошло; повторно не запускался.
+
+Ограничения: четвёртый за сессию сбой загрузки `/search` — теперь зависание навигации, а не незагрузившееся приложение. Причина не установлена; вероятно, то же семейство внешних сбоев, но связь не доказана. Предупреждение CDP 155 vs 153 сохраняется — влияние на renderer timeout не исключено и не проверено.
 
 ## Базовые команды проверки
 
