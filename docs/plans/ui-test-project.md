@@ -32,7 +32,7 @@
 | 4 — Allure-отчёты | завершена, см. ниже |
 | 5 — GitHub Actions | завершена, см. ниже |
 | 6 — Telegram | завершена, см. ниже |
-| 7 — Jenkins | реализована; сборки на Jenkins не проверены |
+| 7 — Jenkins | реализована и проверена на jenkins.qa.guru; отправка в Telegram из Jenkins не проверена |
 | 8 — Review | не начата |
 
 ## Фаза 0 — Baseline
@@ -322,7 +322,7 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 
 ## Фаза 7 — Jenkins
 
-Статус: реализована 2026-10-19; реальные сборки на Jenkins не выполнялись.
+Статус: реализована 2026-10-19; проверены реальные сборки на jenkins.qa.guru — успех (SUCCESS), упавший тест (UNSTABLE), ошибка компиляции и отсутствие результатов (FAILURE); уведомление без Credentials корректно пропускается. Отправка из Jenkins не проверена.
 
 - Адрес Jenkins из ДЗ (сообщён пользователем 2026-10-19): https://jenkins.qa.guru/. Анонимный GET `/` — HTTP 200; `/login` — 302, сервер nginx 1.24.0 (Ubuntu).
 
@@ -361,10 +361,24 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 - [x] Валидатор Jenkins `POST /pipeline-model-converter/validate` на https://jenkins.qa.guru (анонимно, с crumb): `Jenkinsfile successfully validated.`; контрольная испорченная копия (`stagez`) отклонена с `Undefined section "stagez" @ line 26` — валидатор действительно проверяет. Проверяется только декларативная структура, не выполнение и не одобрение sandbox-методов.
 - [x] Передача свойств (временный init-скрипт вне проекта): без `-Dchromeoptions.args` — свойство не передаётся; с ним — `chromeoptions.args:--no-sandbox` в `Test.systemProperties`.
 
+### Реальные сборки на jenkins.qa.guru
+
+Job `magnus80-ui-tests` создана пользователем (Pipeline script from SCM, `https://github.com/magnus80/getting-started-java.git`, `*/hw1`, `Jenkinsfile`). Сборки анонимно недоступны (`api/json`, `consoleText` — 404); Console Output присылает пользователь.
+
+- Сборка #1: job ещё была в режиме «Pipeline script» с пустым скриптом — `Start of Pipeline` / `End of Pipeline`, `SUCCESS` без выполнения; не считается проверкой. Исправлено в настройках job.
+- **Сборка #2** (`89ae9b4`, `java-jdk21-jenkins-agent-5`): `Finished: SUCCESS`. Параметры применились уже в первой SCM-сборке (`1920x1080`); CfT + ChromeDriver 153.0.8010.52 в workspace, версии проверены; Allure CLI — `sha256sum --check --strict: OK`, 2.46.1; `testClasses` и `test` с `-Dchromeoptions.args=--no-sandbox` — BUILD SUCCESSFUL (Chrome под root запустился); `junit` — без изменения статуса; 3 `*-result.json`, отчёт сгенерирован; `archiveArtifacts` выполнен. Post: `python-python314-jenkins-agent-2`, unstash скрипта и XML, `WARNING: Telegram credentials are not configured, notification skipped: Could not find credentials entry with ID 'TELEGRAM_BOT_TOKEN'` — сборка осталась SUCCESS.
+
 ### Не проверено
 
-- [ ] Реальные сборки на jenkins.qa.guru: успех; падение assertion (UNSTABLE); ошибка компиляции (FAILURE); нет результатов (FAILURE); уведомления.
-- [ ] Агент `python`: наличие `python3` (вывод второй стадии разведки не получен).
+- [ ] Число тестов на странице Test Result (в Console Output `junit` его не печатает).
+- [x] Контролируемые падения (временные ветки от `hw1`, по одному изменению; Branch Specifier job переключал пользователь; номера сборок не зафиксированы — в присланном выводе их нет):
+  - `ci-check/jenkins-assertion` (`QA.GURU-NO-SUCH-TEXT`): `3 tests completed, 1 failed` (`successfulSearchTest()` — `ElementShould` в `SearchTests.java:13`), Gradle BUILD FAILED; `junit` записал результаты; лишнего `error` нет; отчёт сгенерирован (3 `*-result.json`); `archiveArtifacts`; уведомление пропущено (нет Credentials) — **`Finished: UNSTABLE`**. Начало вывода с коммитом не прислано — ветка определена по упавшему assertion.
+  - `ci-check/jenkins-compile` (`deecb52`, пропущена `;`): `SearchTests.java:28: error: ';' expected`; `Run UI tests` и `Generate Allure report` — `skipped due to earlier failure(s)`; в post — один `unstash` (только скрипт, JUnit XML не забирался); **`Finished: FAILURE`**.
+  - `ci-check/jenkins-no-results` (`b2000c6`, `--tests NoSuchTest` в Jenkinsfile): `No tests found for given includes: [NoSuchTest]`; `Stashed 0 file(s)`; `junit` — `No test report files were found. Configuration error?`; генерация отчёта пропущена; **`Finished: FAILURE`**.
+- [x] Временные ветки `ci-check/jenkins-*` удалены локально.
+- [ ] Удалить в форке `ci-check/jenkins-*` и `ci-check/notify-*` (пользователь); вернуть Branch Specifier job на `*/hw1` (пользователь).
+- [ ] Отправка из Jenkins (зависит от решения по Credentials).
+- [ ] Агент `python`: наличие `python3` — не проверено (скрипт уведомления не вызывался без Credentials).
 - [ ] Credentials: на общем Jenkins глобальные Credentials доступны всем, кто может настраивать job, — скоуп и риск согласовать с пользователем.
 
 ## Базовые команды проверки
