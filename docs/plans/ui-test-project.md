@@ -31,7 +31,7 @@
 | 3 — Page Object | реализована; нестабильность внешнего GitHub сохраняется, см. ниже |
 | 4 — Allure-отчёты | завершена, см. ниже |
 | 5 — GitHub Actions | завершена, см. ниже |
-| 6 — Telegram | реализована и проверена локально; CI и реальная отправка не проверены |
+| 6 — Telegram | завершена, см. ниже |
 | 7 — Jenkins | не начата |
 | 8 — Review | не начата |
 
@@ -272,7 +272,7 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 
 ## Фаза 6 — Telegram
 
-Статус: реализована и проверена локально 2026-10-19 (Windows 10, Python 3.13.13); реальный запуск в GitHub Actions и реальная отправка не выполнялись.
+Статус: завершена 2026-10-19 — проверена локально (Windows 10, Python 3.13.13) и в реальном GitHub Actions с реальной отправкой.
 
 ### Согласовано
 
@@ -303,11 +303,28 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 - [x] Структура артефакта `junit-and-gradle-report` (по фактически скачанному zip из CI): `test-results/test/TEST-*.xml` → после скачивания в `build/` путь `build/test-results/test` совпадает с `--results-dir`.
 - [x] `actionlint` 1.7.12 — 0 ошибок; ShellCheck локально отсутствует.
 
-### Не проверено
+### Проверено в реальном GitHub Actions (2026-10-19)
 
-- [ ] Реальный run в GitHub Actions: регистрация `notify-telegram`, скачивание артефакта, `python3` на runner, поведение без secrets (ожидается warning).
-- [ ] Реальная отправка и сверка фактического сообщения — после добавления secrets пользователем и разрешения.
-- [ ] Уведомления при контролируемых падениях в CI и при неверном токене.
+- [x] **39303783004** attempt 1 (`hw1`, `834d982`, secrets ещё не заданы): `ui-tests`, `notify-telegram`, `deploy-report` — success; аннотация `notify-telegram`: `warning | TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is not set, notification skipped`. Подтверждены регистрация job, скачивание артефакта через `pattern`, `python3` на runner.
+- [x] Secrets `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` добавлены пользователем; реальная отправка разрешена пользователем. Значения агенту не передавались.
+- [x] **39303783004** attempt 2 (Re-run пользователем): все три job — success, у `notify-telegram` аннотаций нет. Фактическое сообщение (прислано пользователем) совпало с ожидаемым построчно: `UI tests: PASSED` / проект / `CI: GitHub Actions` / `Branch: hw1` / `Commit: 834d98261bb3` / `Tests: passed 3, failed 0, broken 0, skipped 0, total 3` / ссылка на run.
+- [x] **39306919324** `ci-check/notify-assertion` (`QA.GURU-NO-SUCH-TEXT`): `ui-tests` failure, `notify-telegram` success, deploy skipped; сообщение `UI tests: FAILED`, `Tests: passed 2, failed 1, broken 0, skipped 0, total 3`.
+- [x] **39306919806** `ci-check/notify-compile` (пропущена `;`): `ui-tests` failure, `notify-telegram` success (артефакт не скачивался — compile ≠ success); сообщение `UI tests: BUILD ERROR`, `Details: tests did not run`, строки `Tests:` нет.
+- [x] **39310385637** `ci-check/notify-bad-token` (assertion + во временной ветке к токену дописан символ; настоящий secret не менялся): `ui-tests` failure (исходное падение сохранено), `notify-telegram` failure на шаге `Send Telegram notification`, аннотация `Telegram API returned HTTP 401: Unauthorized`; сообщение не пришло. Токена в аннотации нет.
+- [x] Временные ветки `ci-check/notify-*` удалены локально.
+- [ ] Временные ветки `ci-check/notify-assertion`, `ci-check/notify-compile`, `ci-check/notify-bad-token` удалить в форке (пользователь).
+
+Ограничения:
+
+- Полные логи job без токена недоступны агенту: проверены статусы job/шагов, публичные аннотации и фактические сообщения, присланные пользователем.
+- Публичный API (60 запросов/час) был исчерпан частым опросом агента — опрос замедлен до 1 запроса в 90 с; ни один запуск это не затронуло.
+- Сценарии NO RESULTS / NO TESTS / CANCELLED / timeout в CI не воспроизводились — покрыты unit-тестами.
+
+## Фаза 7 — Jenkins
+
+Статус: не начата.
+
+- Адрес Jenkins из ДЗ (сообщён пользователем 2026-10-19): https://jenkins.qa.guru/. Анонимный GET `/` — HTTP 200; `/login` — 302, сервер nginx 1.24.0 (Ubuntu). Версия Jenkins, агенты, плагины и доступ не проверялись.
 
 ## Базовые команды проверки
 
