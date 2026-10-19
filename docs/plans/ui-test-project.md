@@ -32,7 +32,7 @@
 | 4 — Allure-отчёты | завершена, см. ниже |
 | 5 — GitHub Actions | завершена, см. ниже |
 | 6 — Telegram | завершена, см. ниже |
-| 7 — Jenkins | не начата |
+| 7 — Jenkins | реализована; сборки на Jenkins не проверены |
 | 8 — Review | не начата |
 
 ## Фаза 0 — Baseline
@@ -322,9 +322,50 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 
 ## Фаза 7 — Jenkins
 
-Статус: не начата.
+Статус: реализована 2026-10-19; реальные сборки на Jenkins не выполнялись.
 
-- Адрес Jenkins из ДЗ (сообщён пользователем 2026-10-19): https://jenkins.qa.guru/. Анонимный GET `/` — HTTP 200; `/login` — 302, сервер nginx 1.24.0 (Ubuntu). Версия Jenkins, агенты, плагины и доступ не проверялись.
+- Адрес Jenkins из ДЗ (сообщён пользователем 2026-10-19): https://jenkins.qa.guru/. Анонимный GET `/` — HTTP 200; `/login` — 302, сервер nginx 1.24.0 (Ubuntu).
+
+### Факты (анонимное чтение, 2026-10-19)
+
+- Jenkins 2.581 (заголовок `X-Jenkins`); анонимное чтение разрешено (`whoAmI`: anonymous), `pluginManager/api/json` — 403.
+- Агенты для Java: `java-jdk21-jenkins-agent-1…5`, labels `java`, `java-jdk21`, `docker`, по 1 executor; ещё warm-pool, js-node24 и python-python314 агенты. Всего 19 executors.
+- 79 job (47 Pipeline, 32 Freestyle).
+- Плагины — эвристика по ответу `/plugin/<id>/` (400 — установлен, 404 — нет), не список из менеджера плагинов: есть workflow-aggregator, junit, allure-jenkins-plugin, credentials-binding, plain-credentials, timestamper, git, ws-cleanup; нет htmlpublisher, docker-workflow, ansicolor, pipeline-utility-steps.
+- Неизвестно: Chrome/ChromeDriver/python3 на агентах, sudo, `/dev/shm`, user namespaces (агент, вероятно, контейнер — решение `sysctl` из GitHub Actions не переносится без проверки), версия Allure-плагина и его CLI.
+
+### Согласовано
+
+- [x] У пользователя есть логин и право создавать job; job и Credentials создаёт пользователь, агент — без учётных данных Jenkins.
+- [x] Отчёт: Allure Report 2 CLI 2.46.1 с проверкой SHA-256 (как в GitHub Actions) + `archiveArtifacts` (results, отчёт); JUnit — шаг `junit`. Allure-плагин не используется.
+- [x] Статусы: упавшие тесты → UNSTABLE; ошибка компиляции, нет результатов, ошибка генерации отчёта/инфраструктуры → FAILURE.
+- [x] Разведка агента временной Pipeline-job `magnus80-agent-inventory` (создана пользователем; только чтение; вывод прислан пользователем):
+  - `java-jdk21-jenkins-agent-4`: Debian 13 (trixie) в контейнере, ядро хоста 6.17 Ubuntu 24.04; **uid 0 (root)**; Temurin 21.0.12; есть `curl`, `unzip`, `apt-get`; **нет** Chrome/Chromium/ChromeDriver, `python3`, `sudo`, `sysctl`, `docker`; `/dev/shm` 64 МБ (Selenide по умолчанию передаёт `--disable-dev-shm-usage`); `max_user_namespaces=255794`.
+  - CfT 153.0.8010.52 + ChromeDriver той же версии, скачанные в каталог workspace: `ldd` — недостающих библиотек нет; без `--no-sandbox` — `Running as root without --no-sandbox is not supported`, DOM не получен; с `--no-sandbox` — DOM получен (ошибки GPU/EGL в headless без GPU не влияют). Коды выхода в выводе относились к `tail`, а не к Chrome — вывод сделан по тексту ошибки и наличию DOM.
+  - [ ] Стадия на агенте `python` (версия Python, curl) — вывода нет, запрошен у пользователя.
+- [x] Chrome: CfT 153.0.8010.52 + ChromeDriver скачиваются в workspace сборки (как в GitHub Actions); пакеты на общий агент не ставятся.
+- [x] Песочница (решение пользователя): `--no-sandbox` только в Jenkinsfile через `-Dchromeoptions.args=--no-sandbox`; `build.gradle` передаёт `chromeoptions.args` в JVM тестов только если задано. Причина — сборка в контейнере идёт от root, Chrome запрещает песочницу для root (не AppArmor, решение `sysctl` из GitHub Actions неприменимо). Принятый риск: отключена песочница рендерера; смягчение — изолированный контейнер агента, открывается только github.com. Локально и в GitHub Actions песочница остаётся. Имя свойства подтверждено по байткоду: `ChromeDriverFactory` (selenide-core 7.18.2) читает `chromeoptions.args`.
+- [x] Telegram: на `java-jdk21` нет `python3` — уведомление отдельной стадией на агенте label `python`, JUnit XML через `stash`/`unstash`; Credentials `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` (secret text) создаёт пользователь.
+
+### Реализация
+
+Файлы: [Jenkinsfile](../../Jenkinsfile) (новый), `build.gradle` (`chromeoptions.args` передаётся в JVM тестов только если задано), этот план.
+
+- Pipeline from SCM; `agent none`; родительская стадия `UI tests` на `java-jdk21` с вложенными стадиями в одном workspace: Validate parameters (+ stash скрипта уведомления) → Set up Chrome (CfT + ChromeDriver в `$WORKSPACE/.ci-tools`, проверка версий) → Install Allure CLI (SHA-256 `--check --strict`, проверка версии) → Compile tests (`./gradlew testClasses`) → Run UI tests (`./gradlew test` с `-Dheadless=true`, путями к CfT/ChromeDriver и `-Dchromeoptions.args=--no-sandbox`; `returnStatus`; stash JUnit XML; `junit`) → Generate Allure report (без `*-result.json` — ошибка). `post always` стадии — `archiveArtifacts` (allure-results, allure-report, JUnit XML, Gradle HTML).
+- Статусы: упавшие тесты → `junit` выставляет UNSTABLE; Gradle упал, а в JUnit нет падений → `error` (FAILURE); нет JUnit XML → `junit` падает (FAILURE); compile/инфраструктура/нет Allure-результатов → FAILURE. Ретраев, `catchError` для маскировки и `|| true` нет.
+- Параметры: `BROWSER_SIZE` (проверка `^[0-9]{3,4}x[0-9]{3,4}$`), ID Credentials Telegram (по умолчанию `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`); для первой сборки, когда параметры ещё не зарегистрированы, — значения по умолчанию через `?:`. `disableConcurrentBuilds`, `timeout 30 min`, `buildDiscarder`.
+- Уведомление — pipeline `post always` в `node('python')`: unstash скрипта и (если тесты запускались) JUnit XML; `withCredentials` + `sh` с одинарными кавычками — секреты не интерполируются в Groovy; `--ci Jenkins`, `--project $JOB_NAME`, `GIT_BRANCH`/`GIT_COMMIT`/`BUILD_URL`. Нет Credentials (`Could not find credentials entry`) → предупреждение и пропуск; ошибка скрипта/нет `python3`/другая ошибка → `currentBuild.result = 'FAILURE'` (результат Jenkins может только ухудшаться — исходный UNSTABLE/FAILURE не скрывается; FAILURE не перекрывает ABORTED).
+
+### Проверено локально / статически (2026-10-19)
+
+- [x] Валидатор Jenkins `POST /pipeline-model-converter/validate` на https://jenkins.qa.guru (анонимно, с crumb): `Jenkinsfile successfully validated.`; контрольная испорченная копия (`stagez`) отклонена с `Undefined section "stagez" @ line 26` — валидатор действительно проверяет. Проверяется только декларативная структура, не выполнение и не одобрение sandbox-методов.
+- [x] Передача свойств (временный init-скрипт вне проекта): без `-Dchromeoptions.args` — свойство не передаётся; с ним — `chromeoptions.args:--no-sandbox` в `Test.systemProperties`.
+
+### Не проверено
+
+- [ ] Реальные сборки на jenkins.qa.guru: успех; падение assertion (UNSTABLE); ошибка компиляции (FAILURE); нет результатов (FAILURE); уведомления.
+- [ ] Агент `python`: наличие `python3` (вывод второй стадии разведки не получен).
+- [ ] Credentials: на общем Jenkins глобальные Credentials доступны всем, кто может настраивать job, — скоуп и риск согласовать с пользователем.
 
 ## Базовые команды проверки
 
