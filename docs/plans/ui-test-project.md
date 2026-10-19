@@ -30,7 +30,7 @@
 | 2 — Ещё два теста | реализована; есть нестабильность внешнего GitHub, см. ниже |
 | 3 — Page Object | реализована; нестабильность внешнего GitHub сохраняется, см. ниже |
 | 4 — Allure-отчёты | завершена, см. ниже |
-| 5 — GitHub Actions | не начата |
+| 5 — GitHub Actions | согласование завершено; ждёт форк пользователя |
 | 6 — Telegram | не начата |
 | 7 — Jenkins | не начата |
 | 8 — Review | не начата |
@@ -191,6 +191,50 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 - Версия CLI не закреплена в репозитории (ручная установка в `~/tools`); в CI — тот же zip с проверкой checksum (фаза 5).
 - Отчёт просмотрен агентом через Playwright; визуальная приёмка пользователем не зафиксирована.
 - Отрицательная проверка «без агента `@Step` не появляется» не выполнялась — weaving подтверждён наличием шагов.
+
+## Фаза 5 — GitHub Actions
+
+Статус: этап A (согласование) завершён 2026-10-19; реализация ждёт форк пользователя.
+
+### Факты (2026-10-19)
+
+- `gh` CLI локально не установлен; `magnus80/getting-started-java` — 404 через публичный API (GitHub-логин может отличаться от git-имени).
+- Версии и SHA actions получены через releases API и `git ls-remote` (для annotated-тегов — `^{}`); выбираются версии старше 7 дней.
+- Chrome for Testing: последние для milestone 151/152/153 — 151.0.7922.138 / 152.0.7977.82 / 153.0.8010.52; Stable — 155.0.8059.84. Selenium 4.49.0 поддерживает CDP v151–153.
+
+### Согласовано
+
+- [x] Репозиторий: форк `qa-guru/getting-started-java`, создаёт пользователь и сообщает URL; добавляется отдельным remote, `origin` не меняется; push — только с разрешения пользователя.
+- [x] События: `push` (любая ветка) + `workflow_dispatch`; `pull_request`/`pull_request_target` не используются.
+- [x] Публикация: артефакты (retention 14 дней) всегда; GitHub Pages — только из default branch при сгенерированном отчёте, в том числе при упавших тестах (Pages публичны, вложения упавших прогонов тоже).
+- [x] Inputs `workflow_dispatch`: только `browserSize` (regex `^[0-9]{3,4}x[0-9]{3,4}$`); browser=chrome, baseUrl=https://github.com, headless=true фиксированы.
+- [x] Runner `ubuntu-24.04`, `timeout-minutes: 30`, Temurin 21.
+- [x] Actions по SHA: `actions/checkout` v7.0.1 `3d3c42e5aac5ba805825da76410c181273ba90b1`; `actions/setup-java` v6.0.1 `de7274f081f381c8f8158605e0321c36c376e2e6` (v6.1.0 от 2026-10-14 моложе 7 дней); `gradle/actions/setup-gradle` v6.4.0 `3f5f9adaf7d9fecd50b5935e54106014257a94e6`; `browser-actions/setup-chrome` v2.2.0 `48ad923757ca74d66703209fe939badbdf80f2f4`; `actions/upload-artifact` v7.0.2 `cf430e030ddbb5b0abf93d22962f4752f3646cd9`; `actions/upload-pages-artifact` v5.0.0 `fc324d3547104276b827a68afc52ff2a11cc49c9`; `actions/deploy-pages` v5.0.1 `368f82528645a54fb793d4d04e342629a3f51346`.
+- [x] Браузер: Chrome for Testing 153.0.8010.52 + ChromeDriver той же версии; workflow проверяет совпадение версий. Пути передаются в тесты через Gradle только если заданы (локальное поведение не меняется).
+- [x] Allure CLI 2.46.1 — zip с Maven Central, SHA-256 `d25c519bbde940dc953cff8901130ce18b73013dc19a8f8b90b8b4b1c5eb252f`.
+- [x] Permissions: `contents: read` на workflow; `pages: write` + `id-token: write` только у job публикации. Secrets не используются.
+- [x] Compile (`testClasses`) отдельно от `test`; после падения тестов загружаются JUnit XML, `allure-results` и отчёт, job остаётся failure; без результатов генерация явно падает. Без `continue-on-error`, `|| true`, ретраев. Concurrency — один запуск, текущий не отменяется.
+- [x] `--no-sandbox` заранее не добавляется; при падении Chrome на runner — сначала причина, затем отдельное согласование.
+
+### Перед реализацией
+
+- [x] Форк: https://github.com/magnus80/getting-started-java — public, fork of `qa-guru/getting-started-java`, default branch `master`, `has_pages=true`. Добавлен remote `fork`; `origin` не менялся.
+- [ ] Ветка для Pages: деплой только из default branch (`master`), работа идёт в `hw1` — решение пользователя (сделать `hw1` default в форке или влить в `master`).
+- [ ] Включение Actions в форке пользователем — не подтверждено.
+
+### Реализация
+
+Файлы: `.github/workflows/ui-tests.yml` (новый), `build.gradle` (`selenide.browserBinary` и `webdriver.chrome.driver` передаются в JVM тестов только если заданы), этот план.
+
+Проверено локально (2026-10-19, Windows 10):
+
+- [x] `actionlint` 1.7.12 (release-бинарь для Windows, SHA-256 сверен с `actionlint_1.7.12_checksums.txt`, во временном каталоге вне проекта) — 0 ошибок. ShellCheck локально отсутствует — shell-блоки им не проверены.
+- [x] Передача свойств (временный init-скрипт вне проекта, задача `test` остановлена до запуска тестов): без свойств — только `baseUrl`, `browser`, `browserSize`, `headless` с defaults; с `-Dselenide.browserBinary`/`-Dwebdriver.chrome.driver` и путём с пробелом — оба значения доходят до `Test.systemProperties`, пробел сохраняется.
+- [x] Имена свойств подтверждены по байткоду: `selenide.browserBinary` — в `SelenideConfig` (selenide-core 7.18.2), `webdriver.chrome.driver` — в `ChromeDriverService` (selenium-chrome-driver 4.49.0).
+- [x] `setup-chrome` v2.2.0: inputs `chrome-version`, `install-chromedriver`, `install-dependencies` и outputs `chrome-path`, `chromedriver-path` взяты из `action.yml` на закреплённом SHA.
+- [ ] UI-тесты локально после правки `build.gradle` не перезапускались (изменение только добавляет необязательные свойства; defaults подтверждены init-скриптом).
+
+Не проверено (нужен push в форк — только с разрешения пользователя): реальный запуск в GitHub Actions, установка CfT 153 и совпадение версий, `sha256sum --check --strict` на runner, Pages, контролируемые падения (assertion, compile, нет результатов).
 
 ## Базовые команды проверки
 

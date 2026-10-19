@@ -1,0 +1,168 @@
+name: UI tests
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      browserSize:
+        description: Browser window size, WIDTHxHEIGHT
+        required: true
+        default: 1920x1080
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-tests-github-search
+  cancel-in-progress: false
+
+env:
+  CHROME_VERSION: 153.0.8010.52
+  ALLURE_VERSION: 2.46.1
+  ALLURE_SHA256: d25c519bbde940dc953cff8901130ce18b73013dc19a8f8b90b8b4b1c5eb252f
+
+jobs:
+  ui-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      report-generated: ${{ steps.generate.outcome == 'success' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        env:
+          BROWSER_SIZE: ${{ inputs.browserSize || '1920x1080' }}
+        run: |
+          if [[ ! "$BROWSER_SIZE" =~ ^[0-9]{3,4}x[0-9]{3,4}$ ]]; then
+            echo "::error::Invalid browserSize: expected WIDTHxHEIGHT"
+            exit 1
+          fi
+          echo "BROWSER_SIZE=$BROWSER_SIZE" >> "$GITHUB_ENV"
+
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        with:
+          chrome-version: ${{ env.CHROME_VERSION }}
+          install-chromedriver: true
+          install-dependencies: true
+
+      - name: Verify Chrome and ChromeDriver versions
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
+        run: |
+          chrome_version="$("$CHROME_PATH" --version)"
+          driver_version="$("$CHROMEDRIVER_PATH" --version)"
+          echo "$chrome_version"
+          echo "$driver_version"
+          if [[ "$chrome_version" != *"$CHROME_VERSION"* || "$driver_version" != *"$CHROME_VERSION"* ]]; then
+            echo "::error::Chrome and ChromeDriver must both be $CHROME_VERSION"
+            exit 1
+          fi
+
+      - name: Install Allure CLI
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/allure.zip" \
+            "https://repo.maven.apache.org/maven2/io/qameta/allure/allure-commandline/$ALLURE_VERSION/allure-commandline-$ALLURE_VERSION.zip"
+          echo "$ALLURE_SHA256  $RUNNER_TEMP/allure.zip" | sha256sum --check --strict
+          unzip -q "$RUNNER_TEMP/allure.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/allure-$ALLURE_VERSION/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Allure CLI version
+        run: |
+          actual="$(allure --version)"
+          echo "Allure CLI $actual"
+          if [[ "$actual" != "$ALLURE_VERSION" ]]; then
+            echo "::error::Expected Allure CLI $ALLURE_VERSION"
+            exit 1
+          fi
+
+      - name: Compile tests
+        id: compile
+        run: ./gradlew testClasses --console=plain
+
+      - name: Run UI tests
+        id: tests
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
+        run: >-
+          ./gradlew test --console=plain
+          -Dheadless=true
+          "-DbrowserSize=$BROWSER_SIZE"
+          "-Dselenide.browserBinary=$CHROME_PATH"
+          "-Dwebdriver.chrome.driver=$CHROMEDRIVER_PATH"
+
+      - name: Upload Allure results
+        if: always() && steps.compile.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: allure-results
+          path: build/allure-results
+          retention-days: 14
+
+      - name: Upload JUnit and Gradle reports
+        if: always() && steps.compile.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: junit-and-gradle-report
+          path: |
+            build/test-results/test
+            build/reports/tests/test
+          retention-days: 14
+
+      - name: Generate Allure report
+        id: generate
+        if: always() && steps.compile.outcome == 'success'
+        run: |
+          if ! compgen -G "build/allure-results/*-result.json" > /dev/null; then
+            echo "::error::No Allure test results"
+            exit 1
+          fi
+          allure generate build/allure-results -c -o build/allure-report
+
+      - name: Upload Allure report
+        if: always() && steps.generate.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: allure-report
+          path: build/allure-report
+          retention-days: 14
+
+      - name: Upload Pages artifact
+        if: always() && steps.generate.outcome == 'success' && github.ref_name == github.event.repository.default_branch
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: build/allure-report
+          retention-days: 14
+
+  deploy-report:
+    needs: ui-tests
+    if: always() && needs.ui-tests.outputs.report-generated == 'true' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
