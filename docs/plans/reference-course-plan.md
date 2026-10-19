@@ -1,0 +1,365 @@
+# План развития учебного проекта UI-автотестов
+
+## Назначение
+
+Постепенно добавить TestBase, независимые сценарии, Page Object, Allure-отчёты (по решению фазы 4 — генератор Allure Report 2), GitHub Actions, Telegram и Jenkins, сохраняя существующий Java-стек.
+
+В этом документе хранятся согласованные решения, статусы фаз, результаты проверок, ограничения и открытые вопросы. Общие правила работы агента находятся отдельно в [AGENTS.md](../../AGENTS.md). После каждой фазы обновлять этот план; не отмечать выполнение без подтверждённых результатов.
+
+## Согласованные решения
+
+- Java 21 через Gradle Java toolchain; Gradle Wrapper 9.6.0, bin-дистрибутив.
+- Selenide 7.18.2, JUnit Jupiter 6.1.3; исходно разрешённый Selenium — 4.49.0. Версии зависимостей без согласования не менять.
+- Defaults: baseUrl=https://github.com, browser=chrome, browserSize=1920x1080, headless=false.
+- Переопределение через -DbaseUrl, -Dbrowser, -DbrowserSize, -Dheadless с явной передачей этих свойств из Gradle в JVM тестов. Дополнительно (фаза 5) Gradle передаёт `selenide.browserBinary`, `webdriver.chrome.driver` и `chromeoptions.args` только если они заданы; без них локальное поведение не меняется.
+- В CI явно передавать headless=true.
+- Page Object: fluent API; проверки в should…-методах страниц; private final SelenideElement-поля; имена методов описывают пользовательские действия.
+- Отдельные компоненты выделять только при реальном повторении блоков. Не добавлять BasePage, фабрики и сложную конфигурационную систему без необходимости.
+- Структура Page Object: packages `tests` (SearchTests, TestBase) и `pages` (SearchPage, SearchResultsPage). open("/search") живёт в SearchPage.open() и остаётся относительным к baseUrl; assertions — в should…-методах страниц (shouldHaveResult, shouldBeEmpty) с исходными локаторами и порядком проверок.
+- Отчёты: генератор — Allure Report 2 CLI 2.46.1 (локально через Homebrew; в CI — официальный tgz с Maven Central с закреплённым SHA-256); Node.js и npm-зависимости в проект не вводятся (решение пользователя на этапе A фазы 4 вместо изначального Report 3).
+- JVM-адаптеры: Allure Java 3.0.0 — `allure-jupiter` (JUnit 5 и 6) + `allure-selenide` (Selenide 7.x), версии выравниваются через `allure-bom`; формат результатов совместим с генератором Report 2.
+- Шаги в отчёте: `@Step` на методах страниц (требует `-javaagent:aspectjweaver` на JVM тестов, версия 1.9.25) + технические шаги Selenide от `AllureSelenide` (вкладываются в пользовательские). Вложения — Screenshot и Page source только при падении (дефолты `AllureSelenide`); listener регистрируется в `@BeforeAll` TestBase — это выполняется на каждый тестовый класс, а не один раз на JVM; повторный вызов `addListener("allure", …)` заменяет listener с тем же именем.
+- Результаты Allure — `build/allure-results` (`src/test/resources/allure.properties`), отчёт — `build/allure-report`; оба каталога внутри `build/` и не попадают в git.
+
+## Текущее состояние
+
+Последняя сверка файлов и git: 2026-10-19 (фаза 6).
+
+- Фаза 0 завершена; исходный запуск проверен в этой переписке.
+- Фаза 1 завершена по отчёту пользователя. Коммит e55ae45ae599cdfa83cfac608dbe96b42d0a3916 и соответствующая конфигурация подтверждены чтением репозитория; браузерные проверки фазы 1 при сохранении плана не повторялись.
+- Реализация и проверки тестов фазы 2 подтверждены исходниками, коммитом 3cefd221898c108ba538f5daee1ea4c30e76d615 и предоставленным отчётом фазы 3: все три теста выполнены отдельно, с defaults и в headless. Сведения о первоначальном согласовании сценариев и риск данных второго негативного сценария остаются открытыми.
+- Фаза 3 завершена по отчёту пользователя, коммит 1312c8da32be42e5351af1334cf0bf035c65ab54 подтверждён в истории: локаторы и взаимодействия перенесены в pages.SearchPage и pages.SearchResultsPage, тесты и TestBase перемещены в package tests. Структура и сохранение assertions подтверждены чтением файлов; браузерные проверки при обновлении плана не повторялись.
+- Фаза 4 завершена в этой сессии: Allure Java 3.0.0 (адаптеры) + Allure Report 2.46.1 CLI (генератор); проверки и ограничения — в разделе фазы 4.
+- Фаза 5 завершена по отчёту: workflow проверен локально и в реальном GitHub Actions — успешные, контролируемые и диагностические запуски перечислены в разделе фазы 5. Успешный запуск 38311448403 повторно подтверждён через API в фазе 8.
+- Фаза 6 (Telegram) реализована 2026-10-19 и проверена локально (unit-тесты с mock HTTP, dry-run на реальном JUnit XML, actionlint); реальный CI-запуск и отправка не выполнялись — см. раздел фазы 6.
+- Фаза 7 (Jenkins) не начата.
+- Фаза 8 (Review) выполнена 2026-10-17: объём фаз 0–5 проверен без изменения кода, workflow и инфраструктуры; findings, проверки и ограничения — в разделе фазы 8.
+
+Порядок дальнейшей работы: демонстрационный объём фаз 0–5 завершён и проверен; фазы 6–7 выполняются учащимися отдельно, сначала согласование, затем по одной фазе с проверкой и собственным коммитом. Задание для учащихся (два варианта: полный путь 0–8 и короткий путь 6–7): [docs/homework.md](../homework.md).
+
+## Фаза 0 — Baseline
+
+Статус: завершена с зафиксированными ограничениями.
+
+- [x] Изучить сборку, тесты и настройки, проверить git.
+- [x] Проверить wrapper: исходно отсутствовал.
+- [x] Определить фактические версии и требования Java: Selenide и JUnit требуют Java 17+, локально использовалась Java 21.
+- [x] Запустить исходный тест без изменения кода: BUILD SUCCESSFUL, задача test выполнена с --rerun-tasks.
+- [x] Согласовать параметры, Java, wrapper и стиль Page Object.
+
+Проверенная команда из корня репозитория:
+
+```bash
+gradle test --tests SearchTests.successfulSearchTest --rerun-tasks --console=plain
+```
+
+Ограничения: один успешный запуск не доказывает стабильность внешнего GitHub; запрос qa.guru зависит от изменяемых данных. Чтение JUnit XML в build/ блокировалось правилами IDE, даже после запроса доступа.
+
+## Фаза 1 — TestBase
+
+Статус: завершена по отчёту пользователя.
+
+Коммит: e55ae45ae599cdfa83cfac608dbe96b42d0a3916 — Make UI tests reproducible and isolate browser sessions.
+
+- [x] Добавить штатный Gradle Wrapper 9.6.0 с официальным checksum и executable bit для gradlew.
+- [x] Зафиксировать Java 21 toolchain.
+- [x] Добавить TestBase: настройка Selenide в @BeforeEach, closeWebDriver в @AfterEach.
+- [x] Передавать только четыре согласованных свойства в JVM тестов.
+- [x] Подключить TestBase к SearchTests и заменить абсолютный URL на /search.
+- [x] Проверить defaults, переопределение свойств и использование baseUrl внутри JVM тестов.
+- [x] Проверить отсутствие запуска браузера при настройке, изоляцию сессий и cleanup после успеха и контролируемого падения.
+- [x] Удалить временную диагностику, восстановить исходный assertion, повторить успешные запуски и создать отдельный коммит без push.
+
+По отчёту оба финальных запуска завершились BUILD SUCCESSFUL:
+
+```bash
+./gradlew test --tests SearchTests.successfulSearchTest --rerun-tasks --console=plain
+./gradlew test --tests SearchTests.successfulSearchTest -DbaseUrl=https://www.github.com -Dbrowser=chrome -DbrowserSize=1366x768 -Dheadless=true --rerun-tasks --console=plain
+```
+
+Ограничения: macOS ограничила высоту видимого окна до 1050 при настройке 1920x1080; Selenium предупреждал о CDP Chrome 155 и поддерживаемой версии 153. Windows, другие браузеры и CI не проверялись. XML не читался; диагностика получена из stdout.
+
+## Фаза 2 — Tests
+
+Статус: реализация и выполнение тестов подтверждены; первоначальное согласование сценариев и оценка устойчивости данных остаются открытыми.
+
+Коммит: 3cefd221898c108ba538f5daee1ea4c30e76d615 — Add negative GitHub search tests for deterministic empty results.
+
+Источник результатов запуска — предоставленный пользователем отчёт фазы 3. При обновлении плана тесты не перезапускались. Отсутствие сведений о согласовании в этой сессии не означает, что согласование не проводилось.
+
+### Этап A — исследование и согласование, без изменения кода
+
+- [ ] Зафиксировать первоначальное подтверждение пользователем двух дополнительных сценариев.
+- [x] Проверить доступность сценариев в реальном UI: по отчёту фазы 3 все три теста выполнены и прошли после восстановления доступности GitHub.
+- [ ] Зафиксировать обоснование целей, предусловий, данных, assertions, локаторов и рисков обоих дополнительных сценариев.
+- [ ] Подтвердить отсутствие зависимости от неконтролируемых данных для второго негативного сценария.
+
+В реализованных тестах используются noResultsForImpossibleStarsRangeTest (stars:<0) и noResultsForHugeStarsCountTest (stars:>999999999). Проверяются тексты empty state и отсутствие results-list, а не случайный порядок выдачи. Огромный порог stars сам по себе не доказывает логическую невозможность совпадений; этот риск сохраняется. Поисковые данные и assertions не изменять в рамках обновления плана или подключения Allure.
+
+### Этап B — реализация и проверка
+
+- [x] Добавить два независимых теста в SearchTests; сведения о первоначальном согласовании отмечены отдельно выше.
+- [x] Сохранить исходный сценарий: qa.guru и проверку текста QA.GURU.
+- [x] Использовать TestBase, относительный /search, ожидания Selenide и содержательные assertions.
+- [x] Проверить каждый новый тест отдельно, весь набор с defaults и в headless — по отчёту фазы 3.
+- [x] Установить причину наблюдённого падения: GitHub HTTP 429, по отчёту фазы 3; после снятия ограничения набор прошёл без изменения кода.
+- [x] Удалить временную диагностику и создать отдельный коммит реализации; в текущих tracked Java-файлах временной диагностики нет.
+
+Итог по отчёту фазы 3: tests=3, failures=0, skipped=0 в успешном полном запуске. HTTP 429 и зависимость от внешних данных остаются ограничениями, а не устранёнными дефектами.
+
+## Фаза 3 — Page Object
+
+Статус: завершена по предоставленному пользователем отчёту.
+
+Коммит: 1312c8da32be42e5351af1334cf0bf035c65ab54 — Extract GitHub search page objects from tests.
+
+- [x] Подтвердить применимость согласованного стиля к фактическим сценариям.
+- [x] Перенести взаимодействия и локаторы в страницы, проверки — в should…-методы.
+- [x] Проверить необходимость компонентов: повторяющихся блоков нет, компоненты и BasePage не добавлены.
+- [x] Сохранить сценарии и поведение; проверить весь набор и закоммитить изменения.
+
+Итоговая структура: `tests.SearchTests`, `tests.TestBase`, `pages.SearchPage` (open + searchFor), `pages.SearchResultsPage` (shouldHaveResult, shouldBeEmpty). Локаторы, тестовые данные, assertions и порядок проверок сохранены без изменений; это подтверждено сравнением исходников с коммитом фазы 2. Полный переход на пакеты tests и pages подтверждён пользователем в отчёте этапа A.
+
+По отчёту фазы 3 выполнены следующие проверки:
+
+- Каждый тест отдельно: `./gradlew test --tests "tests.SearchTests.<method>"` для трёх методов — BUILD SUCCESSFUL, tests=1, failures=0 в каждом запуске.
+- Полный набор: `./gradlew test --rerun-tasks --console=plain` — BUILD SUCCESSFUL, 3/3.
+- Headless: `./gradlew test -Dheadless=true -DbrowserSize=1366x768 --rerun-tasks --console=plain` — первый запуск упал на третьем тесте с GitHub HTTP 429; после восстановления доступности повторный полный запуск прошёл, tests=3, failures=0, skipped=0.
+- Причина 429 установлена по странице ошибки и подтверждена curl с того же IP; успешный запуск после снятия лимита выполнен без изменения кода. Это не автоматический ретрай и не устранение внешнего ограничения.
+- В отчёте фазы 3 проверка git diff --check прошла, временная диагностика отсутствовала, после коммита дерево было чистым.
+
+При этом обновлении плана подтверждены история и исходники, но UI-тесты, JUnit XML и сетевые ответы повторно не проверялись. Ранее обнаруженные незакоммиченные whitespace-изменения page-классов убраны 2026-10-15 (были только trailing whitespace, без семантики); дерево чистое.
+
+Ограничения: внешний GitHub может отвечать HTTP 429 при частых запросах; точный порог и длительность ограничения не установлены. Windows, другие браузеры и реальный CI не проверялись. Предупреждение CDP сохраняется.
+
+## Фаза 4 — Allure Report 3
+
+Статус: завершена с изменением решения — генератор Allure Report 2 вместо Report 3.
+
+На этапе A пользователь отклонил Node.js-зависимость генератора Report 3 (npm `allure` 3.x) и выбрал Report 2 через Homebrew. Название фазы оставлено как в исходном плане; фактический генератор — Allure Report 2 CLI 2.46.1. JVM-адаптеры — Allure Java 3.0.0.
+
+- [x] Разделить JVM-адаптеры Allure и CLI-генератор отчёта: адаптеры пишут `build/allure-results`, brew `allure` собирает HTML в `build/allure-report`.
+- [x] Проверить совместимость с фактическими Java 21, JUnit 6 и Selenide: allure-java 3.0.0 требует Java 17+ и заявляет работу с JUnit 6 и 5; allure-selenide нацелен на Selenide 7.x; формат результатов Allure Java 3 читается Report 2 (официальный migration guide). Понижать Java, JUnit или Selenide не потребовалось.
+- [x] Выбрать и зафиксировать проверенные версии: allure-bom/allure-jupiter/allure-selenide 3.0.0 (релиз 2026-09-11), aspectjweaver 1.9.25 (2025-11-04), CLI `allure` 2.46.1 (обновлён с 2.36.0 через brew по запросу пользователя).
+- [x] Проверить актуальную документацию и встроенный --help: `allure --version` → 2.46.1; команды `generate` (`-o/--report-dir`, `--clean`, `--single-file`), `open` (`-h`, `-p`), `serve`; отдельного `--help` у субкоманд в 2.x нет.
+- [x] Согласовать шаги и вложения: `@Step` на методах страниц + технические шаги Selenide (выбор пользователя), Screenshot + Page source при падении (дефолты AllureSelenide).
+- [x] Сгенерировать и открыть отчёт, проверить диагностику контролируемого падения.
+- [x] Восстановить успешное состояние, исключить generated artifacts из git и создать коммит.
+
+Проверки этой сессии (2026-10-12):
+
+- `./gradlew test --rerun-tasks --console=plain` — BUILD SUCCESSFUL, 3/3 passed; создано 3 `*-result.json` + контейнеры в `build/allure-results`.
+- Дерево шагов в результатах: пользовательские `@Step` с подстановкой параметров («Search for "qa.guru"») и вложенные технические шаги Selenide (`$("open")`, `set value`, `should have`, `webdriver create/close`).
+- `allure generate build/allure-results --clean -o build/allure-report`; `allure open build/allure-report -h 127.0.0.1 -p 45624` — сервер отвечает HTTP 200; в данных отчёта (`suites.json`, `test-cases/*.json`) все 3 теста passed с полным деревом шагов. UI показан пользователю через browser preview.
+- Контролируемое падение: в `successfulSearchTest` ожидаемый текст временно заменён на `QA.GURU-NO-SUCH-TEXT`. Gradle вернул exit code 1 (BUILD FAILED); причина — намеренный assertion `Element should have text "QA.GURU-NO-SUCH-TEXT"`, не HTTP 429. На упавшем шаге записаны Screenshot (PNG) и Page source (HTML), файлы вложений существуют на диске; stack trace присутствует. После падения браузерных процессов не осталось; `webdriver close()` записан как passed.
+- Изоляция прогонов: `build/allure-results` очищался перед прогоном падения и перед финальным прогоном; отчёт падения собран отдельно в `build/allure-report-failure`.
+- Финальное состояние: assertion восстановлен, `./gradlew test --rerun-tasks` — 3/3 passed, exit code 0; отчёт пересобран в `build/allure-report`.
+
+Ограничения: версия CLI не фиксируется в репозитории (brew-установка глобальна; на момент проверки — 2.46.1), lock-файла нет — осознанный компромисс отказа от Node.js. Отчёт был открыт пользователю через browser preview, но явной визуальной приёмки от пользователя не зафиксировано (исправлено при фазе 5); данные отчёта проверены программно (HTTP 200 и JSON), что визуальную приёмку не заменяет. Windows/Linux и реальный CI не проверялись; внешний GitHub может отвечать HTTP 429.
+
+## Фаза 5 — GitHub Actions
+
+Статус: завершена — workflow проверен локально и в реальном GitHub Actions (см. ниже).
+
+Файлы: [.github/workflows/ui-tests.yml](../../.github/workflows/ui-tests.yml), `build.gradle` (необязательная передача `selenide.browserBinary` и `webdriver.chrome.driver`). Коммит реализации: d473a0242d2952534fe9106f1398ebebe76522d3.
+
+### Согласовано на этапе A (2026-10-12)
+
+- [x] События: только `workflow_dispatch`; push, pull_request и расписание не используются.
+- [x] Публикация: артефакты (retention 14 дней) и публичный GitHub Pages (source = GitHub Actions). Pages публикуется только для запусков из default branch при успешно сгенерированном отчёте, в том числе при упавших тестах.
+- [x] Inputs: `browser` (choice, только `chrome`) и `browserSize` (`^[0-9]{3,4}x[0-9]{3,4}$`). baseUrl зафиксирован как https://github.com, выбор тестов не предусмотрен, headless=true всегда.
+- [x] Браузер: Chrome for Testing 153.0.8010.52 + ChromeDriver той же версии (совпадает с поддержкой CDP в Selenium 4.49.0 — v151–153); пути передаются в тесты через Gradle-свойства.
+- [x] Репозиторий для реального CI: отдельный публичный `qa-guru/getting-started-java-ai` (remote `ai`); `origin` (qa-guru/getting-started-java) не меняется.
+- [x] GitHub secrets в фазе 5 не используются. Имена secrets/credentials, Telegram-уведомления (из каких CI, для каких исходов), расположение Jenkins и агента (ОС, label, инструменты) пока неизвестны — открытые вопросы фаз 6–7.
+
+### Решения workflow
+
+- Runner `ubuntu-24.04` (не `-latest`), `timeout-minutes: 30`.
+- Actions закреплены по SHA (версии опубликованы не позже чем за 7 дней до выбора):
+  - `actions/checkout` v7.0.1 `3d3c42e5aac5ba805825da76410c181273ba90b1`, `persist-credentials: false`;
+  - `actions/setup-java` v6.0.1 `de7274f081f381c8f8158605e0321c36c376e2e6`, Temurin 21;
+  - `gradle/actions/setup-gradle` v6.4.0 `3f5f9adaf7d9fecd50b5935e54106014257a94e6`;
+  - `browser-actions/setup-chrome` v2.2.0 `48ad923757ca74d66703209fe939badbdf80f2f4`;
+  - `actions/upload-artifact` v7.0.1 `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` (v7.0.2 моложе 7 дней на момент выбора);
+  - `actions/upload-pages-artifact` v5.0.0 `fc324d3547104276b827a68afc52ff2a11cc49c9`;
+  - `actions/deploy-pages` v5.0.1 `368f82528645a54fb793d4d04e342629a3f51346`.
+- Allure CLI: `https://repo.maven.apache.org/maven2/io/qameta/allure/allure-commandline/2.46.1/allure-commandline-2.46.1.tgz`, SHA-256 `37428164f310c8d137cfdd2c3a25d049b233261ddab13e1bd4dfd7627b5cbf8d` — совпадает с digest ассета `allure-2.46.1.tgz` в GitHub Release allure-framework/allure2 и с `.sha1` Maven Central. Генератор использует `JAVA_HOME` из setup-java; workflow проверяет Java 21, совпадение версий Chrome/ChromeDriver и версию Allure.
+- Permissions: `contents: read` на уровне workflow; `pages: write` и `id-token: write` только у job `deploy-report`. `pull_request_target` и secrets не используются.
+- Concurrency: одна глобальная группа `ui-tests-github-search` без отмены текущего запуска — снижает риск HTTP 429. GitHub держит не больше одного ожидающего запуска в группе, более ранний ожидающий отменяется. Матрицы, параллельных тестов и ретраев нет.
+- Inputs передаются только через `env` и процитированные аргументы, после проверки по allowlist/regex.
+- Шаги: compile (`./gradlew testClasses`) отдельно от `./gradlew test`. После успешной компиляции, даже при падении тестов, загружаются `allure-results` и `junit-and-gradle-report` (`build/test-results/test`, `build/reports/tests/test`), затем генерируется отчёт. Без `*-result.json` генерация явно падает, пустой отчёт не создаётся. Загрузка сырых результатов идёт до генерации, поэтому ошибка генерации её не блокирует. Без `continue-on-error`, `|| true` и `tee`.
+- Каждый запуск идёт на чистом runner; `build/` не кэшируется, чужие артефакты не скачиваются.
+
+Ожидаемое поведение:
+
+| Сценарий | Итог job | Артефакты |
+|---|---|---|
+| Тесты прошли | success | results, JUnit/Gradle HTML, report; Pages для default branch |
+| Падение assertion | failure (exit code Gradle) | то же, с Screenshot и Page source в results |
+| Ошибка компиляции | failure на шаге Compile tests | нет |
+| Ошибка генерации | failure на шаге Generate | results и JUnit/Gradle HTML |
+| Нет результатов | failure на шаге Generate, `::error::No Allure test results` | только то, что создано |
+
+### Локальная проверка (macOS, 2026-10-12)
+
+- `actionlint` 1.7.12 (release-бинарь с проверкой checksum, вне проекта) со встроенным shellcheck — 0 ошибок.
+- Передача свойств через Gradle (временный init-скрипт в /tmp, `test --dry-run`): без свойств — только четыре исходных значения; с `-Dselenide.browserBinary="/opt/c t/chrome" -Dwebdriver.chrome.driver=…` оба значения доходят до `Test.systemProperties`, путь с пробелом сохраняется. Selenide 7.18.2 читает `selenide.browserBinary` (`SelenideConfig`), Selenium 4.49.0 — `webdriver.chrome.driver`.
+- Скрипт установки CLI: скачивание с Maven Central, `allure --version` → 2.46.1, `JAVA_HOME` = Java 21. `sha256sum --check --strict` локально не проверен: на macOS BSD-утилита без `--strict`, GNU coreutils и Docker недоступны. Сам checksum сверен через `shasum -a 256`.
+- Логика «нет результатов» на пустом каталоге выдаёт ошибку; `allure generate` на результатах фазы 4 → summary passed=3, total=3.
+- UI-тесты локально не перезапускались (риск 429; Java-код не менялся).
+- Linux-окружение локально не проверено: Docker daemon не запущен.
+
+### Проверка в реальном GitHub Actions (2026-10-12)
+
+Репозиторий `qa-guru/getting-started-java-ai` (public, remote `ai`, создан через `gh repo create`; Pages включены через `POST /pages` build_type=workflow). Workflow регистрировался только после push-триггерного probe — особенность GitHub: dispatch-only workflow не индексировался по push на default branch; зарегистрировался после временного `on: [push]` на probe-ветке, затем `workflow_dispatch` заработал, временный триггер не вошёл в master.
+
+Реальные запуски (run id → результат):
+
+- **38308963339** (probe-ветка): dispatch-probe успешен — workflow зарегистрирован.
+- **38309018121** (push-probe): ошибка на уровне workflow ещё до выполнения jobs (0 jobs) — не запуск тестов.
+- **38309080672** (master): падение — `SessionNotCreatedException`, Chrome instance exited; заодно выявил отказ deploy-report: environment `github-pages` допускал только `main`. Исправлено: branch policy `master` добавлена через API (существующая `main` оставлена). Примечание фазы 8: в этом запуске failed-отчёт был опубликован на Pages — поведение publish-always, согласованное на этапе A, подтверждено фактом.
+- **38309549023** (master): падение — то же; шаг setuid-helper искал файл `chrome-sandbox`, которого нет в архиве CfT (фактическое имя — `chrome_sandbox`), поэтому chmod 4755 фактически не применялся (уточнено в фазе 8).
+- **38309814119** (master): падение — то же; `chown root:root` + 4755 также не применялся по той же причине.
+- **38310176235** (ci-check/diag, временная ветка): диагностика — `chrome --headless --dump-dom` падает без `--no-sandbox` и работает с ним; причина падения в логе обрезана и не установлена (вероятна AppArmor-блокировка user namespaces для CfT на Ubuntu 23.10+ — гипотеза, не подтверждена); `--no-sandbox` при этом не доходил до ChromeOptions (см. следующий запуск).
+- **38309984893** (master): падение — `-Dselenide.chromeoptions.args` не сработал: Gradle прокидывает только whitelisted свойства, да и имя у Selenide другое.
+- **38310305965** (master): падение — `selenide.chromeoptions.args` неприменим: Selenide 7 читает plain-свойство `chromeoptions.args` (список через запятую), подтверждено по исходникам `ChromeDriverFactory`/`AbstractChromiumDriverFactory`.
+- **38310531034** (master): **успех** — BUILD SUCCESSFUL, 3/3 теста; артефакты allure-results (4 КБ), junit-and-gradle-report, allure-report, github-pages; Pages развёрнут: https://qa-guru.github.io/getting-started-java-ai/ отвечает HTTP 200, `widgets/summary.json`: passed=3, total=3.
+- **38310722420** (ci-check/assertion-fail): контролируемое падение assertion (`QA.GURU-NO-SUCH-TEXT`) — Run UI tests failure; allure-results с PNG+HTML-вложениями, JUnit XML и report загружены; Pages-шаг и deploy-report пропущены (не default branch). Ветка удалена.
+- **38310878425** (ci-check/compile-fail): ошибка компиляции — Compile tests failure; tests, uploads и generate пропущены; артефактов нет. Ветка удалена.
+- **38311003194** (ci-check/no-results): `./gradlew noSuchTask` — Run UI tests failure; Generate падает с `::error::No Allure test results`, отчёт с нулём тестов не создан, uploads отчёта пропущены. Ветка удалена.
+- **38311448403** ([запуск](https://github.com/qa-guru/getting-started-java-ai/actions/runs/38311448403), master, commit 9799a61): ui-tests и deploy-report — success, BUILD SUCCESSFUL, 3/3 теста; Pages обновлены. Подтверждён повторно в фазе 8 через GitHub API: headSha `9799a61955dbbeacd52fbc59d199f0f17fe6d1bf`, jobs, steps, логи и содержимое артефактов проверены.
+
+В review не считать все красные запуски контролируемыми: в истории есть также реальные ошибки запуска Chrome, передачи свойств и настройки Pages. Последний зелёный запуск не отменяет этой истории и не доказывает отсутствие риска HTTP 429.
+
+Итоговые решения по браузеру: Chrome падает на этом runner без `--no-sandbox` — аргумент передаётся только в CI через `-Dchromeoptions.args=--no-sandbox`; локальные запуски без него. Компромисс принят: ephemeral runner, открывается только github.com. Уточнение фазы 8: настоящая причина падения не установлена (лог диагностики обрезан); setuid-helper фактически не применялся из-за неверного имени файла — вероятная причина (AppArmor/userns) остаётся неподтверждённой гипотезой, поэтому `--no-sandbox` считается принятым риском, а не проверенным решением.
+
+Изменённые файлы фазы: `.github/workflows/ui-tests.yml`, `build.gradle` (проброс `selenide.browserBinary`, `webdriver.chrome.driver`, `chromeoptions.args` — только если заданы), этот план. Коммиты: d473a02 (workflow), 3c490e5 (промежуточный план), 24bea81→f253482 (исправления CI: Pages policy, chrome sandbox helper → удалён, chromeoptions.args), финальный коммит плана — ниже.
+
+Ограничения: один успешный прогон не доказывает стабильность при HTTP 429; входное значение `browserSize` влияет только на окно; macOS/Windows-агенты не используются; push/pull_request-триггеры и секреты отсутствуют; Pages публичны для всего интернета; визуальная приёмка отчёта на Pages пользователем не зафиксирована (проверено: HTTP 200 + summary.json).
+
+## Фаза 6 — Telegram
+
+Статус: реализована и проверена локально (2026-10-19, Windows 10, Python 3.13.13): unit-тесты с fixtures и mock HTTP, dry-run на реальном JUnit XML Gradle, `actionlint`. Реальная отправка и запуск в GitHub Actions **не выполнялись** — нужны secrets в репозитории, push и разрешение пользователя.
+
+Файлы: [ci/telegram_notify.py](../../ci/telegram_notify.py), [ci/test_telegram_notify.py](../../ci/test_telegram_notify.py), [.github/workflows/ui-tests.yml](../../.github/workflows/ui-tests.yml) (job `notify-telegram`), `.gitignore` (`__pycache__/`).
+
+### Согласовано (2026-10-19)
+
+- [x] Источник уведомлений сейчас — GitHub Actions; Jenkins (фаза 7) использует тот же скрипт с `--ci Jenkins`.
+- [x] Уведомлять обо всех исходах: success, failure тестов, ошибка сборки/шага до тестов, отмена.
+- [x] Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (те же имена — для Jenkins Credentials).
+- [x] Нет secrets → `::warning::`, отправка пропускается, exit 0. Ошибка Telegram API → `::error::`, exit 1.
+- [x] Язык скрипта — Python 3, только stdlib (новый язык в проекте согласован пользователем); зависимостей нет.
+- [ ] Разрешение на реальную отправку сообщения — не запрашивалось до появления secrets.
+
+### Решения
+
+- Отдельный job `notify-telegram` (`needs: ui-tests`, `if: always()`), а не шаг внутри `ui-tests`: ошибка уведомления делает красным только этот job и не меняет статус `ui-tests` без `continue-on-error`/`|| true`; исходный failure тестов не маскируется. Токен доступен только этому job, а не job с браузером. Итог всего run при ошибке отправки — failure (осознанно: ошибка видна).
+- JUnit XML передаётся артефактом `junit-and-gradle-report` через `actions/download-artifact` v8.0.2 `9000827ccba6bdab643e8b6fd33ac0654aef8333` (опубликован 2026-10-07). Используется `pattern`, а не `name`: по исходникам v8.0.2 `name` при отсутствии артефакта бросает ошибку, `pattern` без совпадений скачивает 0 артефактов — случай «нет результатов» разбирает скрипт. Скачивание только при `compile-outcome == success`.
+- Исход берётся из `needs.ui-tests.result` и outputs `compile-outcome`/`tests-outcome` (пустое значение → `skipped`). Значения передаются через `env` и процитированные аргументы.
+- Статистика — по элементам `<testcase>` всех `*.xml` каталога (`failure` → failed, `error` → broken, `skipped` → skipped): вложенные `testsuite` не дублируются, атрибуты-счётчики suite не используются.
+- Статусы сообщения: PASSED, FAILED, NO TESTS (0 testcase), NO RESULTS (нет/битый XML), BUILD ERROR (compile не success — тесты не запускались, старые XML не читаются), TEST STEP FAILED (Gradle упал, но все XML-тесты зелёные), CANCELLED.
+- Сообщение plain text (без `parse_mode`): проект, CI, branch, commit (12 символов), статус, passed/failed/broken/skipped/total, ссылка на run.
+- HTTP: POST `sendMessage`, timeout 10 с, успех только при HTTP 200 и `ok: true`. Токен и chat ID не печатаются; текст ошибки дополнительно редактируется (`***`). `TELEGRAM_API_URL` переопределяет адрес API только для тестов с mock-сервером.
+
+### Проверено локально (2026-10-19)
+
+- [x] `python -m unittest test_telegram_notify` (из `ci/`) — 23 теста OK: success, failure, error, skipped, несколько XML, вложенные testsuites, 0 тестов, нет каталога, пустой каталог, битый XML, чужой root, ошибка сборки (старые XML игнорируются), ошибка до compile, отмена, Gradle failure при зелёных XML, нет одного/обоих secrets (запроса нет), HTTP 401/502, HTTP 200 + `ok=false`, timeout (0.5 с), connection refused, редактирование секретов в тексте ошибки, exit 0 при отправке для упавших тестов. Во всех тестах проверено отсутствие токена и chat ID в выводе.
+- [x] Тесты нашли и помогли исправить два дефекта: падение на JSON-ответе не-объекте; `UnicodeEncodeError` при печати эмодзи в консоль cp1251 (Windows-агент упал бы до отправки).
+- [x] `./gradlew test --console=plain -Dheadless=true` — BUILD SUCCESSFUL, затем `--dry-run` на реальном `build/test-results/test/TEST-tests.SearchTests.xml`: `passed 3, failed 0, broken 0, skipped 0, total 3`.
+- [x] Команда шага `Send Telegram notification` выполнена локально в bash с теми же env: без secrets — warning и exit 0; отмена до compile (`COMPILE_OUTCOME`/`TESTS_OUTCOME` = skipped) — CANCELLED.
+- [x] `actionlint` 1.7.12 (Windows release-бинарь, checksum сверен с `actionlint_1.7.12_checksums.txt`) — 0 ошибок. ShellCheck локально отсутствует — shell-блоки им не проверены.
+
+### Непроверенное
+
+- [ ] Реальный run в GitHub Actions: регистрация job, скачивание артефакта (`path: build` рассчитан на корень `build/` у upload-artifact), наличие `python3` на `ubuntu-24.04`.
+- [ ] Реальная отправка в Telegram и сверка фактического сообщения — после добавления secrets пользователем и разрешения.
+- [ ] Контролируемые падения в CI (assertion, compile, no-results, неверный токен) с уведомлением.
+
+## Фаза 7 — Jenkins
+
+Статус: отложена в домашнее задание по решению пользователя; в текущей демонстрации не реализуется. Реализация начинается только после отдельного согласования окружения Jenkins. Наличие Jenkinsfile не означает проверку pipeline; запуск и публикация отчёта подтверждаются на реальном агенте либо остаются явно непроверенными.
+
+### Перед реализацией уточнить
+
+- [ ] Где находятся Jenkins и агент, доступ, ОС, label и доступные инструменты.
+- [ ] Доступность Java, браузеров, драйверов и Allure Report 2 CLI 2.46.1 (Node.js проекту не нужен).
+- [ ] Параметры запуска, имена Jenkins Credentials и Telegram-уведомления.
+- [ ] Способ генерации и публикации Allure Report 2 (CLI с закреплённым checksum, как в GitHub Actions, или Allure Jenkins plugin).
+
+### Реализация и проверка
+
+- [ ] Добавить Jenkinsfile с теми же командами тестов и генерации отчёта, что локально и в GitHub Actions.
+- [ ] Публиковать JUnit XML, сохранять результаты, вложения и отчёт при падениях.
+- [ ] Проверить выбранный способ генерации Report 2 на реальном агенте; не предполагать наличие плагина или CLI.
+- [ ] При отсутствии совместимости согласовать альтернативную генерацию и хранение отчёта.
+- [ ] Не устанавливать плагины и не менять Jenkins глобально без разрешения.
+- [ ] Разделить проверку Jenkinsfile и реальный запуск Jenkins; создать коммит.
+
+## Фаза 8 — Review
+
+Статус: завершена 2026-10-17. По решению пользователя — без изменения кода, workflow и инфраструктуры («только план»). Объём — фазы 0–5; Telegram и Jenkins исключены из review как отложенное ДЗ, а не как выполненные интеграции.
+
+Проверенный код и workflow — commit `9799a61955dbbeacd52fbc59d199f0f17fe6d1bf` (= `ai/master`, commit успешного run 38311448403). Локальный HEAD `bb08099` отличается от него только этим файлом плана; код, workflow и wrapper идентичны — сопоставлено по `git diff`, а не по номеру HEAD. Рабочее дерево чистое: прежние whitespace-изменения `pages/SearchPage.java` и `pages/SearchResultsPage.java` убраны владельцем (см. bb08099), в review не участвовали.
+
+### Проверено локально (2026-10-17)
+
+- [x] Чистый checkout: `git clone` → `git checkout 9799a61` в `/tmp/phase8-review/checkout-9799a61`, изолированный `GRADLE_USER_HOME`; `reset`/`clean` и копирование build-артефактов не использовались, текущее дерево не тронуто.
+- [x] Wrapper и toolchain: `./gradlew --version` сам скачал Gradle 9.6.0-bin; SHA-256 дистрибутива `bbaeb2f…529a01` и `gradle-wrapper.jar` `497c8c2a…a194a9c7` совпали с официальными (downloads.gradle.org). Java — Corretto 21.0.9. Команды: `./gradlew --version`, `./gradlew testClasses --console=plain` — BUILD SUCCESSFUL без предупреждений.
+- [x] Тесты: `./gradlew test --console=plain -Dheadless=true` — 3/3 зелёных против локального Chrome 155; единственное предупреждение — CDP version mismatch (Selenium 4.49.0 поддерживает v151–153, см. риски).
+- [x] Передача свойств: временный init-script и пробный тестовый класс в `/tmp` (не в репозитории) подтвердили дефолты и переопределение `baseUrl`/`browser`/`browserSize`/`headless` в JVM тестов; `selenide.browserBinary` и `webdriver.chrome.driver` доходят до `Configuration`/`System.getProperty` до открытия браузера; Selenide 7 читает `selenide.browserBinary` — подтверждено по исходникам.
+- [x] Тест-код: `Selenide.open("/search")` реально использует `baseUrl`; lifecycle — конфигурация в `@BeforeEach`, `closeWebDriver()` в `@AfterEach` (сессия на тест); `sleep`, ретраев, `@Disabled`, скрытых перезапусков нет.
+- [x] Allure CLI 2.46.1: скачан заново с Maven Central, SHA-256 `37428164…cbf8d` совпал с `.sha1` Maven Central и digest GitHub Release; `allure generate build/allure-results --clean -o build/allure-report` собрал отчёт.
+- [x] Secrets/generated: поиск по tracked files, всей истории и CI-артефактам — секретов нет; `build/` в git не попадает; repo-level Actions variables/secrets пусты.
+
+### Проверено в реальном GitHub Actions (без новых запусков)
+
+- [x] Успешный run [38311448403](https://github.com/qa-guru/getting-started-java-ai/actions/runs/38311448403): headSha `9799a61`, master, jobs `ui-tests`+`deploy-report` success; Temurin 21.0.12.1, Gradle 9.6.0, CfT и ChromeDriver `153.0.8010.52` (версии совпали), Allure CLI 2.46.1 (checksum в CI совпал); BUILD SUCCESSFUL на compile и test; артефакты: 3 `*-result.json`, JUnit `tests=3 failures=0 errors=0 skipped=0`, report, github-pages.
+- [x] Контролируемые падения (временные ветки, удалены): [38310722420](https://github.com/qa-guru/getting-started-java-ai/actions/runs/38310722420) — assertion-fail, артефакты с PNG-screenshot и HTML page source; [38310878425](https://github.com/qa-guru/getting-started-java-ai/actions/runs/38310878425) — compile-fail, стоп на Compile tests, report/deploy skipped; [38311003194](https://github.com/qa-guru/getting-started-java-ai/actions/runs/38311003194) — no-results, явный `::error::No Allure test results`, deploy skipped.
+- [x] Workflow: все 7 actions закреплены по SHA, каждый SHA соответствует заявленному тегу; `actionlint` 1.7.12 со встроенным ShellCheck 0.11.0 — 0 ошибок; inputs валидируются (`browser` — choice `chrome`, `browserSize` — regex `^[0-9]{3,4}x[0-9]{3,4}$`); permissions минимальны на уровне jobs; exit code тестов сохраняется (`|| true`, `continue-on-error`, retries отсутствуют); `build/` не кэшируется.
+- [x] Pages: последний deployment `7024504634` — SHA `9799a61` от run 38311448403; https://qa-guru.github.io/getting-started-java-ai/ — HTTP 200; распакованный артефакт `github-pages` идентичен содержимому сайта (37 файлов), отчёт показывает 3 passed; визуально проверен по скриншотам агентом — приёмка пользователем не зафиксирована.
+
+### Findings и открытые риски
+
+Blocker-дефектов не найдено; код не менялся. Зафиксировано:
+
+- **Существенный риск (доказанный дефект диагностики):** обоснование `--no-sandbox` неточно — setuid-helper ни разу не применялся (файл `chrome_sandbox`, искался `chrome-sandbox`); настоящая причина падения Chrome не установлена, AppArmor/userns — неподтверждённая гипотеза. Компромисс `--no-sandbox` остаётся принятым (ephemeral runner, только github.com) и не переносится на Jenkins/локальные запуски как default.
+- **Подтверждённое решение, не дефект:** publish-always — failed-отчёт с master публикуется на публичный Pages (согласовано на этапе A, подтверждено run `38309080672`); вложения failed-прогона (screenshot, page source, служебные данные runner) публичны — при смене политики добавить условие `needs.ui-tests.result == 'success'`.
+- **Улучшение:** CfT `153.0.8010.52` отстаёт от Stable (`155.0.8059.39` на дату проверки); Selenium 4.49.0 поддерживает CDP только v151–153 — обновление браузера требует сначала обновления стека, отдельное согласование.
+- **Улучшение:** локальные `build/allure-results` накапливают результаты разных прогонов (очистки нет) — локальный отчёт может смешивать прогоны; CI не затронут.
+- **Улучшение/security:** repository-level Actions defaults слабее job-level: `default_workflow_permissions=write`, approve PRs разрешены, `allowed_actions=all`, `sha_pinning_required=false` — любой будущий workflow без `permissions:` получит write-token; усиление — через Settings/API с разрешения.
+- **Улучшение:** `cache-provider: enhanced` у setup-gradle — proprietary-провайдер; open-source default — `basic`.
+- **Риск (принят):** зависимость от живого github.com — данные `qa.guru`, семантика `stars:>999999999`, возможные HTTP 429; без ретраев.
+
+### Непроверенное
+
+- Сценарий «ошибка генерации при сохранённых сырых результатах» — подходящего run в истории нет; без нового запуска не воспроизведён.
+- Публикация failed-отчёта после контролируемого падения на default branch — наблюдалось только неконтролируемое (`38309080672`); на временных ветках deploy не настроен.
+- Dispatch с невалидным `browserSize` и поведение `timeout-minutes` относительно загрузки артефактов — только по коду.
+- Настоящая причина sandbox-падения Chrome в CI — диагностический run не согласован и не выполнялся.
+- Интерактивная визуальная приёмка отчёта пользователем; macOS/Windows-специфика runner'ов.
+
+## Базовые команды проверки
+
+Команды выполняются из корня Git-репозитория. По отчёту фазы 3 полный набор из трёх тестов проверен с defaults и в headless после восстановления доступности GitHub. Эти результаты не гарантируют доступность внешнего сайта при следующем запуске.
+
+```bash
+./gradlew --version
+./gradlew test --rerun-tasks --console=plain
+./gradlew test -Dheadless=true -DbrowserSize=1366x768 --rerun-tasks --console=plain
+allure --version
+allure generate build/allure-results --clean -o build/allure-report
+allure open build/allure-report
+git diff --check
+```
+
+При изменении только этого файла достаточно проверить содержимое Markdown, актуальность статусов, whitespace и состав коммита; UI-тесты ради изменения плана запускать не требуется.
+
+## Критерий завершения фазы
+
+1. Выполнен именно согласованный объём.
+2. Проверки действительно запущены и результаты зафиксированы.
+3. Временная диагностика удалена, ограничения и блокеры перечислены.
+4. Этот план обновлён без превращения предположений в подтверждённые результаты.
+5. Свои изменения закоммичены; чужой WIP не затронут.
+6. Работа остановлена до подтверждения следующей фазы.
