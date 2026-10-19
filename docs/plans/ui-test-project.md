@@ -219,8 +219,9 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 ### Перед реализацией
 
 - [x] Форк: https://github.com/magnus80/getting-started-java — public, fork of `qa-guru/getting-started-java`, default branch `master`, `has_pages=true`. Добавлен remote `fork`; `origin` не менялся.
-- [ ] Ветка для Pages: деплой только из default branch (`master`), работа идёт в `hw1` — решение пользователя (сделать `hw1` default в форке или влить в `master`).
-- [ ] Включение Actions в форке пользователем — не подтверждено.
+- [x] Ветка для Pages: пользователь сделал `hw1` default branch форка (подтверждено API: `default_branch=hw1`) и добавил правило `hw1` в environment `github-pages`.
+- [x] Actions в форке включены пользователем (подтверждено фактическим запуском).
+- Push выполняет пользователь: у агента нет учётных данных GitHub (`git push` → `Invalid username or token`); `gh` не установлен. Логи и артефакты через API без токена недоступны — диагностика через публичные check-run annotations и скачанные пользователем артефакты.
 
 ### Реализация
 
@@ -234,7 +235,25 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 - [x] `setup-chrome` v2.2.0: inputs `chrome-version`, `install-chromedriver`, `install-dependencies` и outputs `chrome-path`, `chromedriver-path` взяты из `action.yml` на закреплённом SHA.
 - [ ] UI-тесты локально после правки `build.gradle` не перезапускались (изменение только добавляет необязательные свойства; defaults подтверждены init-скриптом).
 
-Не проверено (нужен push в форк — только с разрешения пользователя): реальный запуск в GitHub Actions, установка CfT 153 и совпадение версий, `sha256sum --check --strict` на runner, Pages, контролируемые падения (assertion, compile, нет результатов).
+### Реальные запуски в GitHub Actions
+
+- **39298963165** (`hw1`, `45f41fc`, push): ui-tests — failure, deploy-report — failure.
+  - Успешны: checkout, Java 21, Gradle, CfT 153.0.8010.52 + ChromeDriver (совпадение версий проверено шагом), Allure CLI (`sha256sum --check --strict` прошёл, версия 2.46.1), compile.
+  - `Run UI tests` — failure: JUnit XML из артефакта `junit-and-gradle-report` (скачан пользователем, распакован агентом во временный каталог): `tests=3 failures=3`, во всех — `SessionNotCreatedException: Chrome instance exited`, binary — CfT из `/opt/hostedtoolcache`, без `--no-sandbox`.
+  - Логика после падения сработала как задумано: загружены `allure-results`, `junit-and-gradle-report`, `allure-report`, `github-pages`; отчёт сгенерирован.
+  - deploy-report: `Branch "hw1" is not allowed to deploy to github-pages due to environment protection rules` — environment разрешал только `master`; исправлено пользователем в настройках.
+- **39300547939** (временная ветка `ci-check/chrome-sandbox`, `7b67797`): диагностика, job намеренно останавливается до тестов.
+  - `kernel.apparmor_restrict_unprivileged_userns=1`, `unprivileged_userns_clone=1`; `chrome_sandbox` есть, без SUID (`runner:runner`, 0755).
+  - CfT как есть: exit 134, `FATAL … zygote_host_impl_linux.cc:129] No usable sandbox! If you are running on Ubuntu 23.10+ … disabled unprivileged user namespaces with AppArmor …`.
+  - С `--no-sandbox`: exit 0, DOM получен. После `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` с включённой песочницей: exit 0, DOM получен.
+  - Причина установлена: AppArmor на ubuntu-24.04 запрещает непривилегированные user namespaces, нужные песочнице Chrome; у CfT в нестандартном пути нет AppArmor-профиля.
+
+### Решение по песочнице Chrome (согласовано 2026-10-19)
+
+- [x] Шаг workflow `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (с проверкой применения) перед тестами. Песочница Chrome остаётся включённой; ослабляется ограничение ядра только на ephemeral runner. `--no-sandbox` и SUID-helper не используются. Локальные запуски не затрагиваются. Это компромисс конкретного runner — не переносить в Jenkins без отдельной проверки.
+- [ ] Временная ветка `ci-check/chrome-sandbox` удалена в форке (пользователь) и локально.
+
+Не проверено: повторный запуск с исправлением, Pages, контролируемые падения (assertion, compile, нет результатов).
 
 ## Базовые команды проверки
 

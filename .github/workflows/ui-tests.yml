@@ -75,6 +75,14 @@ jobs:
             exit 1
           fi
 
+      - name: Allow Chrome sandbox to use user namespaces
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          if [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" != "0" ]]; then
+            echo "::error::Unprivileged user namespaces are still restricted"
+            exit 1
+          fi
+
       - name: Install Allure CLI
         run: |
           curl -fsSL -o "$RUNNER_TEMP/allure.zip" \
