@@ -30,7 +30,7 @@
 | 2 — Ещё два теста | реализована; есть нестабильность внешнего GitHub, см. ниже |
 | 3 — Page Object | реализована; нестабильность внешнего GitHub сохраняется, см. ниже |
 | 4 — Allure-отчёты | завершена, см. ниже |
-| 5 — GitHub Actions | согласование завершено; ждёт форк пользователя |
+| 5 — GitHub Actions | завершена; временные ветки в форке ждут удаления |
 | 6 — Telegram | не начата |
 | 7 — Jenkins | не начата |
 | 8 — Review | не начата |
@@ -194,7 +194,7 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 
 ## Фаза 5 — GitHub Actions
 
-Статус: этап A (согласование) завершён 2026-10-19; реализация ждёт форк пользователя.
+Статус: завершена 2026-10-19 — workflow проверен в реальном GitHub Actions (успех, Pages, три контролируемых падения).
 
 ### Факты (2026-10-19)
 
@@ -251,9 +251,24 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 ### Решение по песочнице Chrome (согласовано 2026-10-19)
 
 - [x] Шаг workflow `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (с проверкой применения) перед тестами. Песочница Chrome остаётся включённой; ослабляется ограничение ядра только на ephemeral runner. `--no-sandbox` и SUID-helper не используются. Локальные запуски не затрагиваются. Это компромисс конкретного runner — не переносить в Jenkins без отдельной проверки.
-- [ ] Временная ветка `ci-check/chrome-sandbox` удалена в форке (пользователь) и локально.
+- [x] Временная ветка `ci-check/chrome-sandbox` удалена в форке (пользователь; подтверждено `git ls-remote`) и локально.
 
-Не проверено: повторный запуск с исправлением, Pages, контролируемые падения (assertion, compile, нет результатов).
+### Проверка после исправления
+
+- **39301206218** (`hw1`, `e328355`, push): ui-tests и deploy-report — success. Артефакты: `allure-results`, `junit-and-gradle-report`, `allure-report`, `github-pages`. https://magnus80.github.io/getting-started-java/ — HTTP 200; `widgets/summary.json`: passed=3, total=3; `data/suites.json`: все три теста passed.
+- Контролируемые падения (временные ветки от `hw1`, по одному изменению; локально заранее проверено, что compile-fail даёт `';' expected`, а `--tests NoSuchTest` — `No tests found for given includes` и пустой `allure-results`):
+  - **39301635750** `ci-check/assertion-fail` (`QA.GURU-NO-SUCH-TEXT`): `Run UI tests` — failure; загружены `allure-results` (231 КБ против 4.4 КБ у зелёного прогона — вложения), `junit-and-gradle-report`, `allure-report`; Pages пропущен (не default branch). JUnit XML (скачан пользователем): `tests=3 failures=1`, причина — `Element should have text "QA.GURU-NO-SUCH-TEXT"`, остальные два теста passed; не HTTP 429.
+  - **39301635898** `ci-check/compile-fail` (пропущена `;`): первая попытка — **cancelled** без jobs (см. ограничение concurrency); после Re-run (attempt 2) — `Compile tests` failure с аннотацией `SearchTests.java:28 ';' expected`; тесты, загрузки, генерация и Pages пропущены; артефактов нет.
+  - **39301635107** `ci-check/no-results` (`--tests NoSuchTest`): `Run UI tests` — failure; `Upload Allure results` — warning «No files were found»; `Generate Allure report` — failure с `::error::No Allure test results`; отчёт и Pages пропущены; загружен только `junit-and-gradle-report`.
+- [ ] Временные ветки `ci-check/assertion-fail`, `ci-check/compile-fail`, `ci-check/no-results` удалить в форке (пользователь); локально удалены.
+
+Ограничения:
+
+- Concurrency: одна глобальная группа без отмены текущего запуска; GitHub держит в группе не больше одного ожидающего запуска — при почти одновременных push более ранний ожидающий запуск отменяется (фактически случилось с `compile-fail`). Коммит может остаться непроверенным; альтернатива — группа на ветку (параллельные запуски, выше риск HTTP 429) — открытый вопрос.
+- Агент не может сам push/скачивать артефакты/читать логи (нет токена): часть проверок опирается на артефакты и лог, предоставленные пользователем.
+- `--no-sandbox` не используется; `sysctl` ослабляет ограничение AppArmor только на ephemeral runner.
+- Визуальная приёмка отчёта на Pages пользователем не зафиксирована (проверено: HTTP 200 и JSON).
+- Внешний github.com: нестабильность загрузки `/search` и HTTP 429 по-прежнему возможны; ретраев нет.
 
 ## Базовые команды проверки
 
