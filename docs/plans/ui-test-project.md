@@ -29,7 +29,7 @@
 | 1 — TestBase и воспроизводимость | завершена, см. ниже |
 | 2 — Ещё два теста | реализована; есть нестабильность внешнего GitHub, см. ниже |
 | 3 — Page Object | реализована; нестабильность внешнего GitHub сохраняется, см. ниже |
-| 4 — Allure-отчёты | не начата |
+| 4 — Allure-отчёты | завершена, см. ниже |
 | 5 — GitHub Actions | не начата |
 | 6 — Telegram | не начата |
 | 7 — Jenkins | не начата |
@@ -145,7 +145,52 @@
 - [x] Каждый тест отдельно (`--tests "tests.SearchTests.<method>"`) — passed; весь набор с defaults — 3/3.
 - [ ] Весь набор headless (`-Dheadless=true -DbrowserSize=1366x768`) — **2/3**: `openRepositoryFromSearchResultsTest` упал через 31 с на `driver.get("https://github.com/search")` в `SearchPage.open()` — `TimeoutException: Timed out receiving message from renderer`. Скриншот не создан. До логики страниц выполнение не дошло; повторно не запускался.
 
+Открытая задача (решение пользователя — отложить): диагностика нестабильности загрузки `/search` — логи консоли браузера и сетевые запросы при падении.
+
 Ограничения: четвёртый за сессию сбой загрузки `/search` — теперь зависание навигации, а не незагрузившееся приложение. Причина не установлена; вероятно, то же семейство внешних сбоев, но связь не доказана. Предупреждение CDP 155 vs 153 сохраняется — влияние на renderer timeout не исключено и не проверено.
+
+## Фаза 4 — Allure-отчёты
+
+Статус: завершена 2026-10-19 (этап A — согласование, этап B — реализация и проверка).
+
+### Факты (проверено 2026-10-19 по реестрам, не по памяти)
+
+- Локально: `allure` 2.35.1 (Scoop; в bucket доступна только 2.39.0), Node v24.20.0, npm 11.3.0.
+- Maven Central: `allure-bom`/`allure-jupiter`/`allure-selenide` 3.0.0 (2026-09-11); `allure-junit5` — только линейка 2.x (2.35.5), для JUnit 6 не используется; `allure-commandline` 2.46.1 (2026-09-03), zip/tgz с `.sha1`; `aspectjweaver` 1.9.25.
+- `allure-junit-platform` 3.0.0 зависит от `junit-jupiter-api`/`junit-platform-launcher` 6.1.0 (runtime) — та же мажорная линия, что JUnit 6.1.3 проекта.
+- Release notes allure-java 3.0.0: Java 17 baseline (байткод `allure-java-commons` — class version 61), «Support Selenide 7.17.0», сборка обновлялась до Selenide 7.18.1; в проекте 7.18.2.
+- npm `allure`: 3.21.0 опубликован 2026-10-16 (моложе 7 дней), 3.20.1 — 2026-10-06.
+
+### Согласовано
+
+- [x] Генератор — Allure Report 2 CLI 2.46.1 (Java, без Node.js в проекте): zip с Maven Central со сверкой checksum, распаковка вне репозитория. Scoop-установка 2.35.1 не меняется.
+- [x] Адаптеры — `allure-jupiter` + `allure-selenide` 3.0.0 через `allure-bom` 3.0.0.
+- [x] Шаги — `@Step` на методах страниц + `-javaagent:aspectjweaver` 1.9.25 в JVM тестов; плюс технические шаги Selenide от `AllureSelenide`. Weaving подтверждать по фактическим результатам.
+- [x] Вложения при падении — Screenshot и Page source (дефолты `AllureSelenide`); listener регистрируется в `TestBase`.
+- [x] Результаты — `build/allure-results` (очищается перед задачей `test`), отчёт — `build/allure-report`; оба в `build/`, в git не попадают.
+- [x] Совместимость формата результатов allure-java 3 с генератором Report 2 подтвердить реальной генерацией.
+
+### Реализация
+
+Изменённые файлы: `build.gradle` (`allure-bom` + `allure-jupiter` + `allure-selenide`; конфигурация `aspectjAgent` с `aspectjweaver` 1.9.25 → `-javaagent` через `jvmArgumentProviders`; `doFirst` удаляет `build/allure-results`), `src/test/resources/allure.properties` (новый), `tests/TestBase.java` (`SelenideLogger.addListener("allure", new AllureSelenide())` в `@BeforeEach` — повторная регистрация с тем же именем заменяет listener), `@Step` на всех публичных методах `pages.*`, этот план.
+
+CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1` (вне репозитория, PATH не менялся; вызов по полному пути). SHA-1 `a33315cd…5b55` = `.sha1` Maven Central; SHA-256 `d25c519b…eb252f` = digest ассета `allure-2.46.1.zip` в GitHub Release. `allure --version` → 2.46.1; флаги взяты из фактического `--help`: `generate [-c] [-o dir] <results>`, `open [-h host] [-p port] <report>`.
+
+### Проверено (2026-10-19, Windows 10, Chrome 155)
+
+- [x] Разрешённые версии (`dependencies`): allure-* 3.0.0; транзитивные JUnit 6.1.0 подняты до 6.1.3; `aspectjweaver` 1.9.25.
+- [x] Очистка: маркер `stale-marker-result.json` в `build/allure-results` удалён задачей `test`; после прогона — 3 `*-result.json` + 4 контейнера, после прогона с падением — плюс 2 вложения, чужих файлов нет.
+- [x] Weaving `@Step` работает: в `*-result.json` пользовательские шаги с подставленными параметрами («Search for "qa.guru"», «Open repository selenide/selenide from search results»), внутри — технические шаги Selenide (`$("open")`, `set value`, `should have`, `webdriver create/close`).
+- [x] Успешный прогон `./gradlew test --rerun-tasks --console=plain` — 3/3; `allure generate build/allure-results -c -o build/allure-report` → `summary.json` passed=3, total=3. Отчёт открыт (`allure open … -h 127.0.0.1 -p 45624`) и просмотрен в браузере (Playwright): дерево suites, шаги с параметрами.
+- [x] Контролируемое падение (`QA.GURU-NO-SUCH-TEXT` в `successfulSearchTest`): BUILD FAILED; в результате status=failed, причина — `Element should have text "QA.GURU-NO-SUCH-TEXT"`; упал шаг «Check that search results contain …» и вложенный Selenide-шаг; на нём Screenshot (PNG, 157 КБ) и Page source (HTML, 249 КБ), файлы существуют. Отчёт падения собран в отдельный `build/allure-report-failure` и просмотрен в браузере: 1 failed / 2 passed, причина, failed step, вложения. Каталог затем удалён.
+- [x] Assertion восстановлен; финальный прогон — 3/3, отчёт пересобран: passed=3, total=3. Серверы `allure open` остановлены.
+
+Ограничения:
+
+- При пересборке отчёта в тот же каталог уже запущенный `allure open` отдавал старые данные (3 passed + 404 на тест) — кэш браузера или сервера; после пересборки отчёт нужно открывать заново.
+- Версия CLI не закреплена в репозитории (ручная установка в `~/tools`); в CI — тот же zip с проверкой checksum (фаза 5).
+- Отчёт просмотрен агентом через Playwright; визуальная приёмка пользователем не зафиксирована.
+- Отрицательная проверка «без агента `@Step` не появляется» не выполнялась — weaving подтверждён наличием шагов.
 
 ## Базовые команды проверки
 
