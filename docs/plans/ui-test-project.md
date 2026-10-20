@@ -371,10 +371,10 @@ Job `magnus80-ui-tests` создана пользователем (Pipeline scri
 ### Не проверено
 
 - [ ] Число тестов на странице Test Result (в Console Output `junit` его не печатает).
-- [x] Контролируемые падения (временные ветки от `hw1`, по одному изменению; Branch Specifier job переключал пользователь; номера сборок не зафиксированы — в присланном выводе их нет):
-  - `ci-check/jenkins-assertion` (`QA.GURU-NO-SUCH-TEXT`): `3 tests completed, 1 failed` (`successfulSearchTest()` — `ElementShould` в `SearchTests.java:13`), Gradle BUILD FAILED; `junit` записал результаты; лишнего `error` нет; отчёт сгенерирован (3 `*-result.json`); `archiveArtifacts`; уведомление пропущено (нет Credentials) — **`Finished: UNSTABLE`**. Начало вывода с коммитом не прислано — ветка определена по упавшему assertion.
-  - `ci-check/jenkins-compile` (`deecb52`, пропущена `;`): `SearchTests.java:28: error: ';' expected`; `Run UI tests` и `Generate Allure report` — `skipped due to earlier failure(s)`; в post — один `unstash` (только скрипт, JUnit XML не забирался); **`Finished: FAILURE`**.
-  - `ci-check/jenkins-no-results` (`b2000c6`, `--tests NoSuchTest` в Jenkinsfile): `No tests found for given includes: [NoSuchTest]`; `Stashed 0 file(s)`; `junit` — `No test report files were found. Configuration error?`; генерация отчёта пропущена; **`Finished: FAILURE`**.
+- [x] Контролируемые падения (временные ветки от `hw1`, по одному изменению; Branch Specifier job переключал пользователь; номера сборок сообщил пользователь по Build History):
+  - **Сборка #3** `ci-check/jenkins-assertion` (`QA.GURU-NO-SUCH-TEXT`): `3 tests completed, 1 failed` (`successfulSearchTest()` — `ElementShould` в `SearchTests.java:13`), Gradle BUILD FAILED; `junit` записал результаты; лишнего `error` нет; отчёт сгенерирован (3 `*-result.json`); `archiveArtifacts`; уведомление пропущено (нет Credentials) — **`Finished: UNSTABLE`**. Начало вывода с коммитом не прислано — ветка определена по упавшему assertion.
+  - **Сборка #4** `ci-check/jenkins-compile` (`deecb52`, пропущена `;`): `SearchTests.java:28: error: ';' expected`; `Run UI tests` и `Generate Allure report` — `skipped due to earlier failure(s)`; в post — один `unstash` (только скрипт, JUnit XML не забирался); **`Finished: FAILURE`**.
+  - **Сборка #5** `ci-check/jenkins-no-results` (`b2000c6`, `--tests NoSuchTest` в Jenkinsfile): `No tests found for given includes: [NoSuchTest]`; `Stashed 0 file(s)`; `junit` — `No test report files were found. Configuration error?`; генерация отчёта пропущена; **`Finished: FAILURE`**.
 - [x] Временные ветки `ci-check/jenkins-*` удалены локально.
 - [x] Временные ветки `ci-check/jenkins-*` и `ci-check/notify-*` удалены в форке пользователем (подтверждено `git ls-remote`: только `hw1`). Возврат Branch Specifier job на `*/hw1` — по сообщению пользователя не подтверждён отдельно.
 - [x] Отправка из Jenkins — решение пользователя: оставить без Credentials (риск общих Credentials на shared Jenkins); уведомление пропускается с warning. Наличие `python3` на агенте `python` и реальная отправка из Jenkins не проверены.
@@ -399,7 +399,7 @@ Job `magnus80-ui-tests` создана пользователем (Pipeline scri
 ### Проверено в реальном CI
 
 - **GitHub Actions** (форк `magnus80/getting-started-java`): успех + Pages (`39301206218`, последний — `39316920374` на `5732ddd`: все три job success, Pages HTTP 200); падение assertion (`39301635750`), ошибка компиляции (`39301635898` attempt 2), нет результатов (`39301635107`); диагностика и исправление песочницы Chrome (`39300547939`); Telegram: без secrets — warning (`39303783004` #1), реальная отправка PASSED (#2), FAILED (`39306919324`), BUILD ERROR (`39306919806`), неверный токен — падает только `notify-telegram`, `ui-tests` сохраняет свой failure (`39310385637`).
-- **Jenkins** (https://jenkins.qa.guru/job/magnus80-ui-tests/): SUCCESS (#2), UNSTABLE при упавшем тесте, FAILURE при ошибке компиляции и при отсутствии результатов; уведомление без Credentials пропускается с warning, статус не меняет.
+- **Jenkins** (https://jenkins.qa.guru/job/magnus80-ui-tests/): SUCCESS (#2), UNSTABLE при упавшем тесте (#3), FAILURE при ошибке компиляции (#4) и при отсутствии результатов (#5); уведомление без Credentials пропускается с warning, статус не меняет.
 
 ### Не проверено
 
