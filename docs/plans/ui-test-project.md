@@ -35,7 +35,7 @@
 | 7 — Jenkins | завершена; отправка в Telegram из Jenkins не проверена (решение пользователя) |
 | 8 — Review | завершена, см. ниже |
 
-Ретроспектива: [docs/retrospective.md](../retrospective.md) — черновик, личные наблюдения дописываются пользователем.
+Ретроспектива: [docs/retrospective.md](../retrospective.md).
 
 ## Фаза 0 — Baseline
 
