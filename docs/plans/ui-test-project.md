@@ -379,7 +379,7 @@ Job `magnus80-ui-tests` создана пользователем (Pipeline scri
   - **Сборка #4** `ci-check/jenkins-compile` (`deecb52`, пропущена `;`): `SearchTests.java:28: error: ';' expected`; `Run UI tests` и `Generate Allure report` — `skipped due to earlier failure(s)`; в post — один `unstash` (только скрипт, JUnit XML не забирался); **`Finished: FAILURE`**.
   - **Сборка #5** `ci-check/jenkins-no-results` (`b2000c6`, `--tests NoSuchTest` в Jenkinsfile): `No tests found for given includes: [NoSuchTest]`; `Stashed 0 file(s)`; `junit` — `No test report files were found. Configuration error?`; генерация отчёта пропущена; **`Finished: FAILURE`**.
 - [x] Временные ветки `ci-check/jenkins-*` удалены локально.
-- [x] Временные ветки `ci-check/jenkins-*` и `ci-check/notify-*` удалены в форке пользователем (подтверждено `git ls-remote`: только `hw1`). Возврат Branch Specifier job на `*/hw1` — по сообщению пользователя не подтверждён отдельно.
+- [x] Временные ветки `ci-check/jenkins-*` и `ci-check/notify-*` удалены в форке пользователем (подтверждено `git ls-remote`: только `hw1`). Branch Specifier job — `*/hw1` (подтверждено пользователем по настройкам job 2026-10-20).
 - [x] Отправка из Jenkins — решение пользователя: оставить без Credentials (риск общих Credentials на shared Jenkins); уведомление пропускается с warning. Наличие `python3` на агенте `python` и реальная отправка из Jenkins не проверены.
 - [ ] Агент `python`: наличие `python3` — не проверено (скрипт уведомления не вызывался без Credentials).
 - [ ] Credentials: на общем Jenkins глобальные Credentials доступны всем, кто может настраивать job, — скоуп и риск согласовать с пользователем.
