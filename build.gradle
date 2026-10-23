@@ -52,3 +52,15 @@ test {
         delete allureResults
     }
 }
+
+tasks.register("notifyTelegram", TelegramNotify) {
+    resultsDir = layout.buildDirectory.dir("test-results/test")
+    jobStatus = providers.gradleProperty("jobStatus").orElse("success")
+    compileOutcome = providers.gradleProperty("compileOutcome").orElse("skipped")
+    testsOutcome = providers.gradleProperty("testsOutcome").orElse("skipped")
+    projectName = providers.gradleProperty("ciProject").orElse(project.name)
+    ciName = providers.gradleProperty("ciName").orElse("local")
+    branch = providers.gradleProperty("branch").orElse("unknown")
+    commit = providers.gradleProperty("commit").orElse("unknown")
+    runUrl = providers.gradleProperty("runUrl").orElse("unknown")
+}

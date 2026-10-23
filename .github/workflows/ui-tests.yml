@@ -28,23 +28,11 @@ jobs:
     timeout-minutes: 30
     outputs:
       report-generated: ${{ steps.generate.outcome == 'success' }}
-      compile-outcome: ${{ steps.compile.outcome }}
-      tests-outcome: ${{ steps.tests.outcome }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Validate inputs
-        env:
-          BROWSER_SIZE: ${{ inputs.browserSize || '1920x1080' }}
-        run: |
-          if [[ ! "$BROWSER_SIZE" =~ ^[0-9]{3,4}x[0-9]{3,4}$ ]]; then
-            echo "::error::Invalid browserSize: expected WIDTHxHEIGHT"
-            exit 1
-          fi
-          echo "BROWSER_SIZE=$BROWSER_SIZE" >> "$GITHUB_ENV"
 
       - name: Set up Java
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -63,44 +51,19 @@ jobs:
           install-chromedriver: true
           install-dependencies: true
 
-      - name: Verify Chrome and ChromeDriver versions
+      - name: Prepare Chrome and Allure CLI
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
           CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
         run: |
-          chrome_version="$("$CHROME_PATH" --version)"
-          driver_version="$("$CHROMEDRIVER_PATH" --version)"
-          echo "$chrome_version"
-          echo "$driver_version"
-          if [[ "$chrome_version" != *"$CHROME_VERSION"* || "$driver_version" != *"$CHROME_VERSION"* ]]; then
-            echo "::error::Chrome and ChromeDriver must both be $CHROME_VERSION"
-            exit 1
-          fi
-
-      - name: Allow Chrome sandbox to use user namespaces
-        run: |
+          "$CHROME_PATH" --version | grep -F "$CHROME_VERSION"
+          "$CHROMEDRIVER_PATH" --version | grep -F "$CHROME_VERSION"
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          if [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" != "0" ]]; then
-            echo "::error::Unprivileged user namespaces are still restricted"
-            exit 1
-          fi
-
-      - name: Install Allure CLI
-        run: |
           curl -fsSL -o "$RUNNER_TEMP/allure.zip" \
             "https://repo.maven.apache.org/maven2/io/qameta/allure/allure-commandline/$ALLURE_VERSION/allure-commandline-$ALLURE_VERSION.zip"
           echo "$ALLURE_SHA256  $RUNNER_TEMP/allure.zip" | sha256sum --check --strict
           unzip -q "$RUNNER_TEMP/allure.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/allure-$ALLURE_VERSION/bin" >> "$GITHUB_PATH"
-
-      - name: Verify Allure CLI version
-        run: |
-          actual="$(allure --version)"
-          echo "Allure CLI $actual"
-          if [[ "$actual" != "$ALLURE_VERSION" ]]; then
-            echo "::error::Expected Allure CLI $ALLURE_VERSION"
-            exit 1
-          fi
 
       - name: Compile tests
         id: compile
@@ -109,6 +72,7 @@ jobs:
       - name: Run UI tests
         id: tests
         env:
+          BROWSER_SIZE: ${{ inputs.browserSize || '1920x1080' }}
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
           CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
         run: >-
@@ -118,20 +82,13 @@ jobs:
           "-Dselenide.browserBinary=$CHROME_PATH"
           "-Dwebdriver.chrome.driver=$CHROMEDRIVER_PATH"
 
-      - name: Upload Allure results
+      - name: Upload test results
         if: always() && steps.compile.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: allure-results
-          path: build/allure-results
-          retention-days: 14
-
-      - name: Upload JUnit and Gradle reports
-        if: always() && steps.compile.outcome == 'success'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: junit-and-gradle-report
+          name: test-results
           path: |
+            build/allure-results
             build/test-results/test
             build/reports/tests/test
           retention-days: 14
@@ -140,10 +97,7 @@ jobs:
         id: generate
         if: always() && steps.compile.outcome == 'success'
         run: |
-          if ! compgen -G "build/allure-results/*-result.json" > /dev/null; then
-            echo "::error::No Allure test results"
-            exit 1
-          fi
+          compgen -G "build/allure-results/*-result.json" > /dev/null || { echo "::error::No Allure test results"; exit 1; }
           allure generate build/allure-results -c -o build/allure-report
 
       - name: Upload Allure report
@@ -161,6 +115,25 @@ jobs:
           path: build/allure-report
           retention-days: 14
 
+      - name: Send Telegram notification
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          JOB_STATUS: ${{ job.status }}
+          COMPILE_OUTCOME: ${{ steps.compile.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+        run: >-
+          ./gradlew notifyTelegram --console=plain
+          "-PjobStatus=$JOB_STATUS"
+          "-PcompileOutcome=$COMPILE_OUTCOME"
+          "-PtestsOutcome=$TESTS_OUTCOME"
+          "-PciProject=$GITHUB_REPOSITORY"
+          "-PciName=GitHub Actions"
+          "-Pbranch=$GITHUB_REF_NAME"
+          "-Pcommit=$GITHUB_SHA"
+          "-PrunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
   deploy-report:
     needs: ui-tests
     if: always() && needs.ui-tests.outputs.report-generated == 'true' && github.ref_name == github.event.repository.default_branch
@@ -176,44 +149,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
-
-  notify-telegram:
-    needs: ui-tests
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Download JUnit results
-        if: needs.ui-tests.outputs.compile-outcome == 'success'
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: junit-and-gradle-report
-          merge-multiple: true
-          path: build
-
-      - name: Send Telegram notification
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          JOB_STATUS: ${{ needs.ui-tests.result }}
-          COMPILE_OUTCOME: ${{ needs.ui-tests.outputs.compile-outcome }}
-          TESTS_OUTCOME: ${{ needs.ui-tests.outputs.tests-outcome }}
-          BRANCH: ${{ github.ref_name }}
-          COMMIT: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: >-
-          python3 ci/telegram_notify.py
-          --results-dir build/test-results/test
-          --job-status "$JOB_STATUS"
-          --compile-outcome "$COMPILE_OUTCOME"
-          --tests-outcome "$TESTS_OUTCOME"
-          --project "$GITHUB_REPOSITORY"
-          --ci "GitHub Actions"
-          --branch "$BRANCH"
-          --commit "$COMMIT"
-          --run-url "$RUN_URL"

@@ -34,6 +34,7 @@
 | 6 — Telegram | завершена, см. ниже |
 | 7 — Jenkins | завершена; отправка в Telegram из Jenkins не проверена (решение пользователя) |
 | 8 — Review | завершена, см. ниже |
+| 9 — Чистка CI по отзыву | реализована и проверена локально; реальные запуски GitHub Actions и Jenkins не выполнялись, см. ниже |
 
 Ретроспектива: [docs/retrospective.md](../retrospective.md).
 
@@ -275,7 +276,7 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 
 ## Фаза 6 — Telegram
 
-Статус: завершена 2026-10-19 — проверена локально (Windows 10, Python 3.13.13) и в реальном GitHub Actions с реальной отправкой.
+Статус: завершена 2026-10-19 — проверена локально (Windows 10, Python 3.13.13) и в реальном GitHub Actions с реальной отправкой. Python-скрипт и job `notify-telegram` заменены в фазе 9 Gradle-таском `notifyTelegram`; описание ниже — история.
 
 ### Согласовано
 
@@ -325,7 +326,7 @@ CLI: `allure-commandline-2.46.1.zip` с Maven Central → `~/tools/allure-2.46.1
 
 ## Фаза 7 — Jenkins
 
-Статус: реализована 2026-10-19; проверены реальные сборки на jenkins.qa.guru — успех (SUCCESS), упавший тест (UNSTABLE), ошибка компиляции и отсутствие результатов (FAILURE); уведомление без Credentials корректно пропускается. Отправка из Jenkins не проверена.
+Статус: реализована 2026-10-19; проверены реальные сборки на jenkins.qa.guru — успех (SUCCESS), упавший тест (UNSTABLE), ошибка компиляции и отсутствие результатов (FAILURE); уведомление без Credentials корректно пропускается. Отправка из Jenkins не проверена. Jenkinsfile упрощён в фазе 9 (уведомление на том же агенте `java-jdk21`, без агента `python`); описание ниже — история.
 
 - Адрес Jenkins из ДЗ (сообщён пользователем 2026-10-19): https://jenkins.qa.guru/. Анонимный GET `/` — HTTP 200; `/login` — 302, сервер nginx 1.24.0 (Ubuntu).
 
@@ -418,6 +419,40 @@ Job `magnus80-ui-tests` создана пользователем (Pipeline scri
 - `--no-sandbox` в Jenkins (root в контейнере агента) — принятый риск; GitHub Actions — `sysctl` userns на ephemeral runner, песочница включена.
 - Concurrency GitHub Actions: при почти одновременных push ожидающий запуск отменяется (наблюдалось).
 - Pages публичны, включая вложения упавших прогонов.
+
+## Фаза 9 — Чистка CI по отзыву
+
+Статус: реализована 2026-10-23, проверена локально. Реальные запуски GitHub Actions и Jenkins после изменений не выполнялись — нужен push (разрешения пока нет).
+
+### Отзыв и согласовано (2026-10-23)
+
+- Отзыв (пересказ пользователя): почистить CI — workflow GitHub Actions и Jenkinsfile, много лишнего кода; убрать скрипты из `ci/` — перенести в основной скрипт или actions.
+- Ограничения задания, которые сохраняются: отдельный шаг компиляции и статус BUILD ERROR, статистика из JUnit XML, проверка HTTP status и `ok`, timeout, проверка уведомления на fixtures и mock HTTP, сверка версий Chrome/ChromeDriver, закреплённый Allure CLI с SHA-256.
+- [x] Вариант пользователя: логика уведомления — Java-таск Gradle `notifyTelegram` в `buildSrc` (тот же стек, что у проекта; unit-тесты сохраняются). Python и папка `ci/` удаляются.
+
+### Реализация
+
+Файлы: `buildSrc/build.gradle`, `buildSrc/src/main/java/TelegramNotifier.java` (логика), `buildSrc/src/main/java/TelegramNotify.java` (таск), `buildSrc/src/test/java/TelegramNotifierTest.java`, `build.gradle` (регистрация `notifyTelegram`), `.github/workflows/ui-tests.yml`, `Jenkinsfile`, `.gitignore` (убран `__pycache__/`), удалены `ci/telegram_notify.py`, `ci/test_telegram_notify.py`, этот план.
+
+- `notifyTelegram`: параметры через `-P` (`jobStatus`, `compileOutcome`, `testsOutcome`, `ciProject`, `ciName`, `branch`, `commit`, `runUrl`; defaults — `success`/`skipped`/`skipped`/имя проекта/`local`/`unknown`); secrets — env `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, читаются при выполнении таска; `TELEGRAM_API_URL` — адрес API (для проверки ошибок). Статусы, формат сообщения, редактирование secrets и поведение (нет secrets → `::warning::`, успех; ошибка API → `::error::` и падение таска) — как у Python-скрипта. Таск не зависит от компиляции тестов. Убран `--dry-run` (без secrets таск печатает сообщение и ничего не отправляет); «не-JSON ответ» теперь сообщается как `ok=false`.
+- GitHub Actions: job `notify-telegram` убран — уведомление последним шагом `ui-tests` с `if: always()`, статус из `job.status`, outcomes шагов `compile`/`tests`; secrets — только в env этого шага. Шаги проверки `browserSize`, версий Chrome и Allure объединены в один шаг подготовки (версии сверяются `grep -F`, Allure — по SHA-256); три загрузки артефактов → `test-results` и `allure-report`. 219 → 151 строка.
+- Jenkins: `agent { label 'java-jdk21' }` на весь pipeline; агент `python`, `stash`/`unstash`, параметры ID Credentials и проверка `BROWSER_SIZE` убраны; Chrome, ChromeDriver и Allure CLI ставятся одной стадией. Уведомление — `post always` на том же агенте; нет Credentials → `WARNING` и запуск таска без secrets (сообщение в логе, отправки нет); любая другая ошибка (включая ошибку API) пробрасывается → FAILURE. 191 → 114 строк.
+
+### Проверено локально (2026-10-23, Windows 10, Java 21.0.7)
+
+- [x] `./gradlew -p buildSrc test` — 16 тестов, 0 failures: подсчёт passed/failed/broken/skipped, несколько XML, вложенные `testsuite`, атрибуты-счётчики игнорируются, нет каталога / пустой каталог / битый XML / чужой root; PASSED с проверкой пути, `chat_id` и полного текста; FAILED и broken; CANCELLED, NO RESULTS, NO TESTS, TEST STEP FAILED; BUILD ERROR при старых XML; нет обоих secrets / нет chat ID — запросов нет; HTTP 401, `ok=false`, не-JSON, JSON-массив; timeout (0.5 с, < 1.9 с); connection refused; редактирование токена и chat ID. В каждом сценарии проверено отсутствие secrets в выводе.
+- [x] Мутация: `failure` → `error` в подсчёте — 4 теста упали; код восстановлен, 16/16.
+- [x] Тесты `buildSrc` при обычной сборке не запускаются (собирается только `:buildSrc:jar`).
+- [x] `./gradlew notifyTelegram` на реальном JUnit XML без secrets — сообщение `UI tests: PASSED`, `Tests: passed 3, failed 0, broken 0, skipped 0, total 3`, `::warning::`, BUILD SUCCESSFUL.
+- [x] С фиктивными secrets и `TELEGRAM_API_URL=http://127.0.0.1:9` — `::error::Telegram API request failed: java.net.ConnectException`, BUILD FAILED, exit 1; фиктивного токена в выводе нет.
+- [x] `actionlint` 1.7.12 (release-бинарь, checksum сверен, вне проекта) — 0 ошибок.
+
+### Не проверено
+
+- [ ] Валидатор Jenkinsfile: jenkins.qa.guru 2026-10-23 недоступен с этой машины (TLS handshake failed / connection timeout; github.com при этом — HTTP 200).
+- [ ] Реальные запуски GitHub Actions: успех, падение assertion, ошибка компиляции, отправка в Telegram, Pages.
+- [ ] Реальные сборки Jenkins: SUCCESS / UNSTABLE / FAILURE и уведомление без Credentials на агенте `java-jdk21`.
+- [ ] Риск: если упадёт подготовка Java/Gradle в GitHub Actions, шаг уведомления тоже упадёт (раньше его выполнял отдельный job); job при этом остаётся failure.
 
 ## Базовые команды проверки
 
