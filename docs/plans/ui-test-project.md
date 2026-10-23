@@ -34,7 +34,7 @@
 | 6 — Telegram | завершена, см. ниже |
 | 7 — Jenkins | завершена; отправка в Telegram из Jenkins не проверена (решение пользователя) |
 | 8 — Review | завершена, см. ниже |
-| 9 — Чистка CI по отзыву | реализована и проверена локально; реальные запуски GitHub Actions и Jenkins не выполнялись, см. ниже |
+| 9 — Чистка CI по отзыву | реализована; проверена локально и в GitHub Actions (успех, падение assertion, ошибка компиляции); Jenkins не проверен (недоступен), см. ниже |
 
 Ретроспектива: [docs/retrospective.md](../retrospective.md).
 
@@ -422,7 +422,7 @@ Job `magnus80-ui-tests` создана пользователем (Pipeline scri
 
 ## Фаза 9 — Чистка CI по отзыву
 
-Статус: реализована 2026-10-23, проверена локально. Реальные запуски GitHub Actions и Jenkins после изменений не выполнялись — нужен push (разрешения пока нет).
+Статус: реализована 2026-10-23; проверена локально и в реальном GitHub Actions. Jenkins после изменений не проверялся — jenkins.qa.guru недоступен.
 
 ### Отзыв и согласовано (2026-10-23)
 
@@ -447,10 +447,21 @@ Job `magnus80-ui-tests` создана пользователем (Pipeline scri
 - [x] С фиктивными secrets и `TELEGRAM_API_URL=http://127.0.0.1:9` — `::error::Telegram API request failed: java.net.ConnectException`, BUILD FAILED, exit 1; фиктивного токена в выводе нет.
 - [x] `actionlint` 1.7.12 (release-бинарь, checksum сверен, вне проекта) — 0 ошибок.
 
+### Проверено в реальном GitHub Actions (2026-10-23)
+
+Push `hw1` в форк разрешён пользователем. Статусы шагов — из публичного API (`actions/runs/{id}/jobs`); логи шагов анонимно недоступны.
+
+- [x] **39923315406** (`hw1`, `f2bea42`): `ui-tests` и `deploy-report` — success, все шаги success, включая `Prepare Chrome and Allure CLI` и `Send Telegram notification`; аннотаций нет (нет `::warning::` об отсутствии secrets); Pages — HTTP 200. Текст сообщения пользователем не прислан.
+- [x] **39924236734** `ci-check/gradle-notify-assertion` (`QA.GURU-NO-SUCH-TEXT`): `Run UI tests` failure; `Upload test results`, `Generate Allure report`, `Upload Allure report` — success; Pages artifact и `deploy-report` — skipped; `Send Telegram notification` success; job — failure. Текст сообщения пользователем не прислан.
+- [x] **39924236672** `ci-check/gradle-notify-compile` (пропущена `;` в `SearchTests.java:28`): `Compile tests` failure (`';' expected`), тесты, артефакты и отчёт — skipped, `Send Telegram notification` success, job — failure. Сообщение (прислано пользователем): `UI tests: BUILD ERROR`, branch `ci-check/gradle-notify-compile`, commit `2739ede856f2`, `Details: tests did not run`, строки `Tests:` нет.
+- [x] Временные ветки `ci-check/gradle-notify-*` удалены локально и в форке (с подтверждения пользователя); `git ls-remote --heads fork` — только `hw1`.
+- Ошибки процесса: первый push ушёл в `origin` (репозиторий курса) — отклонён с 403, изменений там нет; опрос статусов исчерпал анонимный лимит GitHub API (60 запросов/ч), повтор — после сброса.
+
 ### Не проверено
 
 - [ ] Валидатор Jenkinsfile: jenkins.qa.guru 2026-10-23 недоступен с этой машины (TLS handshake failed / connection timeout; github.com при этом — HTTP 200).
-- [ ] Реальные запуски GitHub Actions: успех, падение assertion, ошибка компиляции, отправка в Telegram, Pages.
+- [ ] Тексты сообщений PASSED (39923315406) и FAILED (39924236734) не сверены — пользователь их не присылал.
+- [ ] Ошибка Telegram API (неверный токен) в реальном CI — после переделки не проверялась (покрыта unit-тестами и локальным запуском таска).
 - [ ] Реальные сборки Jenkins: SUCCESS / UNSTABLE / FAILURE и уведомление без Credentials на агенте `java-jdk21`.
 - [ ] Риск: если упадёт подготовка Java/Gradle в GitHub Actions, шаг уведомления тоже упадёт (раньше его выполнял отдельный job); job при этом остаётся failure.
 
